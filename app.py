@@ -3,40 +3,55 @@ from streamlit_gsheets import GSheetsConnection
 import imaplib
 import email
 from email.header import decode_header
-import plotly.graph_objects as go
 import pandas as pd
+import re
 
 # =========================================================
-# 1. CONFIGURACIÓN Y LIMPIEZA AUTOMÁTICA
+# 1. CIRUGÍA DE EMERGENCIA PARA LA LLAVE
 # =========================================================
 ID_HOJA_CALCULO = "1fdCf2HsS8KKkuqrJ8DwiDednW8lwnz7-WfvuVJwQnBo" 
 
 st.set_page_config(page_title="Gestión Maquinaria Pro", layout="wide")
 
-def conectar_limpio():
+def limpiar_llave_pem(llave):
+    # Elimina caracteres que no sean ASCII (como el error 195)
+    llave_limpia = llave.encode("ascii", "ignore").decode("ascii")
+    # Asegura que los saltos de línea sean correctos para Google
+    if "-----BEGIN PRIVATE KEY-----" in llave_limpia:
+        cuerpo = llave_limpia.replace("-----BEGIN PRIVATE KEY-----", "").replace("-----END PRIVATE KEY-----", "").strip()
+        # Quitamos espacios y saltos de línea locos, luego reconstruimos
+        cuerpo_limpio = "".join(cuerpo.split())
+        # Google necesita que el cuerpo esté en bloques o con \n
+        return f"-----BEGIN PRIVATE KEY-----\n{cuerpo_limpio}\n-----END PRIVATE KEY-----\n"
+    return llave_limpia
+
+def conectar_con_fuerza():
     try:
-        # Intentamos la conexión estándar
+        # Si la llave existe, la intentamos limpiar antes de que la use la conexión
+        if "connections" in st.secrets and "gsheets" in st.secrets.connections:
+            # Sobrescribimos la llave en memoria solo para esta sesión
+            llave_sucia = st.secrets.connections.gsheets.private_key
+            st.secrets.connections.gsheets.private_key = limpiar_llave_pem(llave_sucia)
+        
         return st.connection("gsheets", type=GSheetsConnection)
     except Exception as e:
         st.error(f"❌ Error de llave PEM: {e}")
-        st.info("Revisa que en Secrets no haya puntos (.) o espacios donde no deben ir.")
         return None
 
-conn = conectar_limpio()
+conn = conectar_con_fuerza()
 
 def cargar_datos_nube():
     if conn is None: return pd.DataFrame()
     try:
         return conn.read(spreadsheet=ID_HOJA_CALCULO, worksheet="Sheet1", ttl=0)
-    except Exception as e:
-        st.warning("Conexión lograda, pero no se pudo leer la hoja. ¿Está compartida con el Service Account?")
+    except Exception:
         return pd.DataFrame()
 
 def guardar_datos_nube(df_nuevo):
     if conn is None: return
     try:
         conn.update(spreadsheet=ID_HOJA_CALCULO, worksheet="Sheet1", data=df_nuevo)
-        st.success("✅ ¡Actualizado en Google Sheets!")
+        st.success("✅ Guardado correctamente")
     except Exception as e:
         st.error(f"Error al guardar: {e}")
 
@@ -46,24 +61,16 @@ def guardar_datos_nube(df_nuevo):
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
 
-def buscar_ids_recientes():
+def buscar_correos():
     try:
         imap = imaplib.IMAP4_SSL("imap.gmail.com")
         imap.login(EMAIL_USUARIO, EMAIL_PASSWORD)
         imap.select("INBOX", readonly=True)
-        status, mensajes = imap.search(None, 'ALL')
+        _, mensajes = imap.search(None, 'ALL')
         ids = [i.decode() for i in mensajes[0].split()]
-        imap.logout()
-        return ids[-10:]
-    except: return []
-
-def leer_correos(ids_a_buscar):
-    try:
-        imap = imaplib.IMAP4_SSL("imap.gmail.com")
-        imap.login(EMAIL_USUARIO, EMAIL_PASSWORD)
-        imap.select("INBOX", readonly=True)
+        
         lista = []
-        for i in reversed(ids_a_buscar):
+        for i in reversed(ids[-5:]): # Solo los últimos 5 para ir rápido
             res, msg = imap.fetch(i, "(RFC822)")
             for respuesta in msg:
                 if isinstance(respuesta, tuple):
@@ -82,22 +89,18 @@ if conn:
     if "seccion" not in st.session_state: st.session_state.seccion = "Inicio"
 
     @st.fragment(run_every="30s")
-    def motor_sincronizacion():
+    def sincronizar():
         df_actual = cargar_datos_nube()
         if not df_actual.empty:
-            ids_recientes = buscar_ids_recientes()
-            ids_en_nube = df_actual['id'].astype(str).tolist()
-            ids_nuevos = [i for i in ids_recientes if str(i) not in ids_en_nube]
-            
-            if ids_nuevos:
-                nuevos = leer_correos(ids_nuevos)
+            ids_nube = df_actual['id'].astype(str).tolist()
+            nuevos = [c for c in buscar_correos() if str(c['id']) not in ids_nube]
+            if nuevos:
                 df_final = pd.concat([pd.DataFrame(nuevos), df_actual], ignore_index=True)
                 guardar_datos_nube(df_final)
                 st.rerun()
         st.session_state.datos_app = df_actual
 
-    motor_sincronizacion()
-
+    sincronizar()
     df = st.session_state.get('datos_app', pd.DataFrame())
 
     if not df.empty:
@@ -125,6 +128,6 @@ if conn:
                         guardar_datos_nube(df)
                         st.rerun()
     else:
-        st.info("Conectado. Esperando datos del Excel o correos nuevos...")
+        st.info("Conectado. Esperando datos...")
 else:
-    st.warning("⚠️ Error en Secrets. La aplicación no puede iniciar sin una llave válida.")
+    st.warning("⚠️ Error en la llave. Revisa los Secrets.")
