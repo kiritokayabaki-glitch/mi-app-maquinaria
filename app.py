@@ -5,14 +5,22 @@ from google.oauth2.service_account import Credentials
 import imaplib
 import email
 from email.header import decode_header
+import re
 
 # =========================================================
-# 1. TUS CREDENCIALES (PEGA AQUÍ LOS DATOS DE TU JSON)
+# 1. TUS DATOS (RELLENA CON TU JSON)
 # =========================================================
-# Nota: No borres las r antes de las comillas, ayudan a leer texto plano.
-PRIVATE_KEY = r"""-----BEGIN PRIVATE KEY-----
-PEGA_AQUI_TODA_TU_LLAVE_TAL_CUAL_ESTA_EN_EL_JSON
------END PRIVATE KEY-----"""
+ID_HOJA = "1fdCf2HsS8KKkuqrJ8DwiDednW8lwnz7-WfvuVJwQnBo"
+EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
+EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
+
+# PEGA AQUÍ SOLO EL TEXTO LARGO DE LA LLAVE (LO QUE ESTÁ ENTRE COMILLAS EN EL JSON)
+# No incluyas los \n, solo pega el bloque de texto si puedes.
+LLAVE_BRUTA = """
+-----BEGIN PRIVATE KEY-----
+PEGA_AQUI_EL_CONTENIDO_DE_TU_LLAVE
+-----END PRIVATE KEY-----
+"""
 
 CREDS_INFO = {
   "type": "service_account",
@@ -27,96 +35,93 @@ CREDS_INFO = {
   "universe_domain": "googleapis.com"
 }
 
-ID_HOJA = "1fdCf2HsS8KKkuqrJ8DwiDednW8lwnz7-WfvuVJwQnBo"
-EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
-EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
+# =========================================================
+# 2. LIMPIADOR AGRESIVO DE LLAVE (EVITA EL ERROR 4, 95)
+# =========================================================
+def limpiar_llave_maestra(raw_key):
+    # Eliminamos el texto de cabecera y pie para limpiar el centro
+    cuerpo = raw_key.replace("-----BEGIN PRIVATE KEY-----", "")
+    cuerpo = cuerpo.replace("-----END PRIVATE KEY-----", "")
+    # Quitamos espacios, saltos de línea y caracteres extraños (como el error 95)
+    cuerpo = re.sub(r'\s+', '', cuerpo)
+    # Reconstruimos la llave con el formato exacto que pide el estándar PEM
+    llave_final = "-----BEGIN PRIVATE KEY-----\n" + cuerpo + "\n-----END PRIVATE KEY-----\n"
+    return llave_final
 
 # =========================================================
-# 2. LIMPIADOR DE LLAVE PEM (ELIMINA EL ERROR 95)
+# 3. CONEXIÓN Y LÓGICA
 # =========================================================
-def corregir_llave(llave_sucia):
-    # Paso 1: Quitar espacios en blanco al inicio y final
-    llave = llave_sucia.strip()
-    # Paso 2: Si la llave se pegó con \n literales, los convertimos
-    llave = llave.replace("\\n", "\n")
-    # Paso 3: Asegurar que el encabezado y pie sean limpios
-    if "-----BEGIN PRIVATE KEY-----" not in llave:
-        llave = "-----BEGIN PRIVATE KEY-----\n" + llave + "\n-----END PRIVATE KEY-----"
-    return llave
+st.set_page_config(page_title="Gestión Maquinaria", layout="wide")
+st.title("🚜 Control de Maquinaria")
 
-# =========================================================
-# 3. CONEXIÓN A GOOGLE SHEETS
-# =========================================================
-def conectar_hoja():
+@st.cache_resource
+def obtener_cliente_google():
     try:
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         info = CREDS_INFO.copy()
-        info["private_key"] = corregir_llave(PRIVATE_KEY)
+        info["private_key"] = limpiar_llave_maestra(LLAVE_BRUTA)
         
-        credentials = Credentials.from_service_account_info(info, scopes=scope)
-        client = gspread.authorize(credentials)
-        return client.open_by_key(ID_HOJA).sheet1
+        creds = Credentials.from_service_account_info(info, scopes=scope)
+        return gspread.authorize(creds)
     except Exception as e:
         st.error(f"❌ Error de Autenticación: {e}")
         return None
 
-# =========================================================
-# 4. INTERFAZ Y LÓGICA
-# =========================================================
-st.set_page_config(page_title="Control Maquinaria", layout="wide")
-st.title("🚜 Gestión de Reportes")
+cliente = obtener_cliente_google()
 
-sheet = conectar_hoja()
-
-if sheet:
-    st.sidebar.success("✅ Conectado a Google Sheets")
-    
-    # Cargar datos
-    registros = sheet.get_all_records()
-    df = pd.DataFrame(registros)
-
-    # Gmail Sync
-    if st.button("🔄 Sincronizar Gmail"):
-        try:
-            imap = imaplib.IMAP4_SSL("imap.gmail.com")
-            imap.login(EMAIL_USUARIO, EMAIL_PASSWORD)
-            imap.select("INBOX")
-            _, msg_ids = imap.search(None, 'ALL')
-            
-            ids_actuales = [str(i) for i in df['id'].tolist()] if not df.empty else []
-            nuevos_datos = []
-            
-            for i in reversed(msg_ids[0].split()[-10:]):
-                id_str = i.decode()
-                if id_str not in ids_actuales:
-                    _, data = imap.fetch(i, "(RFC822)")
-                    mensaje = email.message_from_bytes(data[0][1])
-                    asunto, enc = decode_header(mensaje.get("Subject", "Sin Asunto"))[0]
-                    if isinstance(asunto, bytes): asunto = asunto.decode(enc or "utf-8")
-                    nuevos_datos.append([id_str, asunto, mensaje.get("From"), ""])
-            
-            if nuevos_datos:
-                sheet.append_rows(nuevos_datos)
-                st.success(f"¡{len(nuevos_datos)} reportes nuevos!")
-                st.rerun()
-            else:
-                st.info("No hay correos nuevos.")
-            imap.logout()
-        except Exception as e:
-            st.error(f"Error Gmail: {e}")
-
-    # Mostrar Pendientes
-    if not df.empty:
-        df['comentario'] = df['comentario'].fillna("").astype(str)
-        pendientes = df[df['comentario'] == ""]
+if cliente:
+    try:
+        hoja = cliente.open_by_key(ID_HOJA).sheet1
+        st.sidebar.success("✅ Conectado a Google Sheets")
         
-        st.subheader(f"Reportes Pendientes: {len(pendientes)}")
-        for idx, row in pendientes.iterrows():
-            with st.expander(f"Reporte: {row['asunto']}"):
-                fila_num = idx + 2 # +2 porque Sheets empieza en 1 y la fila 1 es encabezado
-                sol = st.text_area("Solución:", key=f"t_{row['id']}")
-                if st.button("Guardar ✅", key=f"b_{row['id']}"):
-                    sheet.update_cell(fila_num, 4, sol) # Columna 4 es 'comentario'
+        # Cargar Datos
+        records = hoja.get_all_records()
+        df = pd.DataFrame(records)
+
+        # Sincronización Gmail
+        if st.button("🔄 Sincronizar con Gmail"):
+            with st.spinner("Buscando correos..."):
+                imap = imaplib.IMAP4_SSL("imap.gmail.com")
+                imap.login(EMAIL_USUARIO, EMAIL_PASSWORD)
+                imap.select("INBOX")
+                _, data = imap.search(None, 'ALL')
+                mail_ids = data[0].split()
+                
+                existentes = df['id'].astype(str).tolist() if not df.empty else []
+                nuevos = []
+                
+                for m_id in reversed(mail_ids[-10:]):
+                    id_s = m_id.decode()
+                    if id_s not in existentes:
+                        _, m_data = imap.fetch(m_id, "(RFC822)")
+                        msg = email.message_from_bytes(m_data[0][1])
+                        asunto, enc = decode_header(msg.get("Subject", "Sin Asunto"))[0]
+                        if isinstance(asunto, bytes): asunto = asunto.decode(enc or "utf-8")
+                        nuevos.append([id_s, asunto, msg.get("From"), ""])
+                
+                if nuevos:
+                    hoja.append_rows(nuevos)
+                    st.success(f"¡{len(nuevos)} nuevos reportes!")
                     st.rerun()
-else:
-    st.warning("No se pudo establecer la conexión. Revisa que tu llave no tenga caracteres extraños.")
+                else:
+                    st.info("No hay correos nuevos.")
+                imap.logout()
+
+        # Mostrar Tabla de Trabajo
+        if not df.empty:
+            df['comentario'] = df['comentario'].fillna("").astype(str)
+            pendientes = df[df['comentario'] == ""]
+            
+            st.subheader(f"Pendientes: {len(pendientes)}")
+            for idx, row in pendientes.iterrows():
+                with st.expander(f"Asunto: {row['asunto']}"):
+                    solucion = st.text_area("Solución:", key=f"sol_{row['id']}")
+                    if st.button("Guardar ✅", key=f"btn_{row['id']}"):
+                        # +2 porque gspread usa base 1 y hay encabezado
+                        hoja.update_cell(idx + 2, 4, solucion)
+                        st.rerun()
+        else:
+            st.info("La hoja está vacía. Haz clic en sincronizar.")
+
+    except Exception as e:
+        st.error(f"Error de lectura: {e}")
