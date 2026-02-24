@@ -7,21 +7,21 @@ import plotly.graph_objects as go
 import pandas as pd
 
 # --- 1. CONEXIÓN SEGURA CON GOOGLE SHEETS ---
-# Usamos la conexión configurada en Secrets (gcp_service_account)
+# La conexión 'gsheets' leerá automáticamente el bloque [gcp_service_account] de tus Secrets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def cargar_datos_nube():
     try:
-        # Cargamos los datos. ttl=2 permite que el celular vea cambios de la PC rápido.
-        # Asegúrate de que tu pestaña se llame "Sheet1"
+        # ttl=2 permite que los cambios se vean casi en tiempo real entre PC y Celular
+        # IMPORTANTE: worksheet debe ser el nombre de tu pestaña abajo en el Excel
         return conn.read(worksheet="Sheet1", ttl=2)
     except Exception as e:
         return pd.DataFrame(columns=["id", "asunto", "de", "cuerpo", "comentario"])
 
 def guardar_datos_nube(df_nuevo):
     try:
-        # IMPORTANTE: No pasamos URL_HOJA aquí para evitar el error de permisos.
-        # La librería usará automáticamente las credenciales de los Secrets.
+        # ELIMINAMOS 'spreadsheet=URL_HOJA' para que use el permiso de la Service Account
+        # Esto evitará el error UnsupportedOperationError
         conn.update(worksheet="Sheet1", data=df_nuevo)
     except Exception as e:
         st.error(f"Error al guardar: {e}")
@@ -102,7 +102,7 @@ st.markdown("""<style>
 if "seccion" not in st.session_state: st.session_state.seccion = "Inicio"
 if "db_fotos" not in st.session_state: st.session_state.db_fotos = {}
 
-# --- 4. MOTOR DE SINCRONIZACIÓN (Sincroniza PC y Celular cada 10s) ---
+# --- 4. MOTOR DE SINCRONIZACIÓN (Revisa cambios cada 10 segundos) ---
 @st.fragment(run_every="10s")
 def motor_principal():
     df_actual = cargar_datos_nube()
@@ -126,7 +126,7 @@ def motor_principal():
 
 motor_principal()
 
-# --- 5. INTERFAZ VISUAL ---
+# --- 5. INTERFAZ ---
 df = st.session_state.get('datos_app', pd.DataFrame(columns=["id", "asunto", "de", "cuerpo", "comentario"]))
 df['comentario'] = df['comentario'].fillna("")
 pendientes = df[df['comentario'] == ""]
@@ -135,7 +135,7 @@ atendidas = df[df['comentario'] != ""]
 with st.sidebar:
     st.title("🚜 Menú")
     if st.button("🏠 Inicio", key="nav_i"): st.session_state.seccion = "Inicio"
-    if st.button("🔔 Habilitar Alertas"): st.success("Sonido activo")
+    if st.button("🔔 Alertas"): st.success("Sonido activo")
     st.write("---")
     if st.button("🔴 Pendientes", key="nav_p"): st.session_state.seccion = "Pendientes"
     st.markdown(f'<div class="badge-container"><span></span><span class="badge-text bg-pendientes">{len(pendientes)}</span></div>', unsafe_allow_html=True)
@@ -159,7 +159,7 @@ elif st.session_state.seccion == "Pendientes":
         with st.expander(f"⚠️ {row['asunto']}"):
             st.write(f"**De:** {row['de']}")
             st.info(row['cuerpo'])
-            nota = st.text_area("Registrar nota:", key=f"n_{uid}")
+            nota = st.text_area("Nota:", key=f"n_{uid}")
             if st.button("Confirmar ✅", key=f"btn_{uid}"):
                 if nota.strip():
                     df.loc[df['id'].astype(str) == uid, 'comentario'] = nota
