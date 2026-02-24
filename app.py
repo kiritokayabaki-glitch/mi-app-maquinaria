@@ -3,12 +3,16 @@ import imaplib
 import email
 from email.header import decode_header
 import time
+from streamlit_autorefresh import st_autorefresh # <-- Nueva librería
 
 # --- CONFIGURACIÓN ---
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
 
-# --- FUNCIONES DE GMAIL ---
+# 1. AUTO-REFRESCO AUTOMÁTICO (Cada 10 segundos)
+# Esto hará que la app se sincronice sola sin parpadear el texto
+st_autorefresh(interval=10000, key="datarefresh")
+
 def decodificar_texto(texto, encoding):
     try:
         if isinstance(texto, bytes):
@@ -53,26 +57,19 @@ def leer_correos():
     except: return []
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Gestión Maquinaria Fija", layout="wide")
+st.set_page_config(page_title="Gestión Maquinaria Pro", layout="wide")
 
-# 1. CREAR LA "MALETA" DE MEMORIA (Solo se crea una vez)
+# Inicializar memoria de datos
 if "db_comentarios" not in st.session_state:
-    st.session_state.db_comentarios = {} # Aquí guardaremos {id_correo: texto}
+    st.session_state.db_comentarios = {}
 if "lista_correos" not in st.session_state:
     st.session_state.lista_correos = leer_correos()
-if "last_sync" not in st.session_state:
-    st.session_state.last_sync = time.time()
 
-# 2. SINCRONIZACIÓN AUTOMÁTICA (Cada 30 segundos para evitar parpadeo constante)
-ahora = time.time()
-if ahora - st.session_state.last_sync > 30:
-    nuevos = leer_correos()
-    if nuevos:
-        st.session_state.lista_correos = nuevos
-    st.session_state.last_sync = ahora
-    st.rerun()
+# Actualizar lista de correos en cada refresco automático
+st.session_state.lista_correos = leer_correos()
 
-st.title("🚜 Panel de Control (Datos Protegidos)")
+st.title("🚜 Panel de Control - Actualización en Tiempo Real")
+st.write(f"Refrescando automáticamente cada 10 segundos...")
 
 # --- MOSTRAR CORREOS ---
 if st.session_state.lista_correos:
@@ -87,22 +84,20 @@ if st.session_state.lista_correos:
                 st.info(f"**Mensaje:**\n{item['Cuerpo']}")
             
             with col_registro:
-                # 3. LÓGICA DE PERSISTENCIA:
-                # Recuperamos el comentario de la "maleta" si ya existía
+                # Recuperar comentario guardado
                 valor_previo = st.session_state.db_comentarios.get(uid, "")
                 
-                # Al escribir, guardamos inmediatamente en la maleta
                 nuevo_comentario = st.text_area(
                     "Comentario del Técnico:", 
                     value=valor_previo, 
                     key=f"input_{uid}"
                 )
                 
-                # Actualizamos la maleta si el usuario escribió algo
+                # Guardar al escribir
                 if nuevo_comentario != valor_previo:
                     st.session_state.db_comentarios[uid] = nuevo_comentario
                 
-                # 4. SEMÁFORO DE ESTADO FIJO
+                # Estado
                 if st.session_state.db_comentarios.get(uid, "").strip():
                     st.success("🟢 ESTADO: ATENDIDA")
                 else:
@@ -111,12 +106,4 @@ if st.session_state.lista_correos:
                 c1, c2 = st.columns(2)
                 with c1: st.file_uploader("🖼️ Anteriormente", key=f"ant_{uid}")
                 with c2: st.file_uploader("📸 Actual", key=f"act_{uid}")
-                
-                if st.button("💾 Bloquear Reporte", key=f"btn_{uid}"):
-                    st.toast("Guardado en memoria del sistema.")
             st.divider()
-
-# Botón manual para refrescar sin esperar los 30 seg
-if st.sidebar.button("🔄 Sincronizar Ahora"):
-    st.session_state.lista_correos = leer_correos()
-    st.rerun()
