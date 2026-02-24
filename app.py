@@ -14,8 +14,35 @@ ID_HOJA = "1fdCf2HsS8KKkuqrJ8DwiDednW8lwnz7-WfvuVJwQnBo"
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
 
-# PEGA AQUÍ TODO EL CONTENIDO DE "private_key" QUE VIENE EN EL JSON
-LLAVE_DE_GOOGLE = """TU_LLAVE_AQUI"""
+# PEGA AQUÍ TU LLAVE (Incluso si tiene \n o se ve rara)
+LLAVE_BRUTA = """-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCxmiHe70esGUZV
+vHiu5lfQfNWalqAMPb1IMU66QG9eRy/TnEbFn68bKX94HYSwG7Y2WRvZcmE/rVr6
+dWUUya+y28yRtFKK33XNTpXasE2hJryXJu9oe9oCB2Y6Hx61J0mFLD7wDJFzJc5o
+LYAvw7s+TfT7TQk1hj2Q8fK/A7v7BOOerMliskZvDtV7wzaHg+QhPEaa6tup2n4w
+16aL/8SOrL+GtHEgSESfG32VfodQuudx7zNi8/e+HGHClrQe33XEtf/cUUDvW75b
+Y5hH0Oos+I9UQQT3CXt4QbWgYpMvLxTshG8zgZ6Oc+mFcEjykqSEwLZRRD9MswEj
+mjDSVrgNAgMBAAECggEAGwqPTqzbGlKM2YAFVgf/ZeCj+1Ik00hROh070fL+ofmv
+yAX65psuI7IZVPYVnmTRxQujSGP4d6QS/qCCP/yHcnGx/5tXmAp3Gsf03CPM5hUK
+UO9eM2fsJTPwNjhHyihNsueuO4mGWeRvPYB0DJG+QDnJa7vqg4pJdHjKT5gndowi
+YyaND1KjUMZrxIXd/cRexTICLugDUSXeSI7P780pjqThIBjPKxLU+7AOGA+fVn9Z
+xuQfJpJRDKMIl0FGaHwghxM0Wl35QDQEVMnqgPnRstas7yEKYivwctremKj/hjl1
+TRGw+W0/z1R4b3O4RT4OslQbRY45A84FxIsbA5OWNwKBgQDm12iKroXIikLbBY+e
+fXiePwzh1BXnDjzfWw+Z7UUiuYRIh7HPcfoRl8nAunq2uGr0nU1pIVq1DE0pQoEY
+K5RYnSRBV0wynV+A2XfjfsT3FSXwGJN/LRf12lvU539sX5Xg9429JjHXKPuLKDB0
+V/Ceci2QNrmgZHVb3ad7F+OqKwKBgQDE9VG1X/6AWJXVAbKwbxCVKALl3OCfdEtf
+LHe/sKwaJcFgIAsATNQkua+QcYc11wjJdJgxp4cHiPOUv7Zv62C9qS+gvrW23r+Q
+nn1P5XUYeQPoSmLeHHhI99FJwWhOFCV/TFRI/f6nsz/hrZikYJGfQUKpTYYD4+1PI
+vWOQwSsipwKBgAu3Fuki3ktFKQtwhs9mUr7FOGQlnU7ynAhB2NLZBc8zVxFPQajj
+getupqCPVjb7uQHdEdaqCK5zh172rxKI86hjoTlnsshG0Ff7sWfsQRbBDgHXXXTw
+1ux1Pn/Zl8/qMfMO3TSiQZlHzSxMx9i/tch0xvcwr88CCiq1XxCSL82tAoGBAKGv
+YawraZmjHx0Fj9MW2d4YQojAkgVUSquOrZ9HQYEVjXGD3IQajey4Ik/JYt3n8Oaw
+OGBKzqZ43r01xGaMK5aG1Pp4lGPS6B+pLB6BW5ZqcN/jToY1QXRqpWJmD7AeyfNW
+UOyfuLcW4zAHZaTT/gUcszZPzLiYWWdpUdr7OJXxAoGBAJNE93RrgdH8I4eJyjtj
+83kBROXx6W6KWrqXQnnab2NUbP43vDI+vu7WayIDS9VCNdW0yZwyL5RYRDqDagiG
+2LlZ8s9RwXRcxrGFRWzbSgzMidbw3+wksOyrrV0f4tbd6BIK5MHZZHbkL8rjPEmV
+U5EQz8kl3+kywoTTSEI150ZA
+-----END PRIVATE KEY-----"""
 
 CREDS_INFO = {
   "type": "service_account",
@@ -31,108 +58,88 @@ CREDS_INFO = {
 }
 
 # ==========================================
-# 2. PURIFICADOR DE LLAVE (ANTI-ERROR 95)
+# 2. RECONSTRUCTOR DE LLAVE (BYPASS DE ERROR)
 # ==========================================
-def purificar_llave(texto):
-    # Paso A: Convertir \n de texto en saltos de línea reales
-    llave = texto.replace("\\n", "\n")
-    # Paso B: Limpiar espacios y caracteres raros en los extremos
-    llave = llave.strip()
-    # Paso C: Forzar que los guiones sean estándar (Esto mata el Error 95)
-    # Reemplazamos cualquier guion largo o guion bajo por guion normal
-    llave = llave.replace("_", "-").replace("—", "-")
+def reconstruir_llave_limpia(raw):
+    # Eliminar cualquier rastro de encabezado viejo para evitar el error de posición 2
+    cuerpo = raw.replace("-----BEGIN PRIVATE KEY-----", "")
+    cuerpo = cuerpo.replace("-----END PRIVATE KEY-----", "")
+    # Quitar \n literales, saltos de línea y espacios
+    cuerpo = cuerpo.replace("\\n", "").replace("\n", "").replace(" ", "").strip()
     
-    # Asegurar que tenga el formato PEM correcto
-    if "-----BEGIN PRIVATE KEY-----" not in llave:
-        llave = "-----BEGIN PRIVATE KEY-----\n" + llave
-    if "-----END PRIVATE KEY-----" not in llave:
-        llave = llave + "\n-----END PRIVATE KEY-----"
+    # Reconstruir con guiones estándar escritos directamente en el código
+    header = "-----BEGIN PRIVATE KEY-----"
+    footer = "-----END PRIVATE KEY-----"
     
-    return llave
+    # Google espera bloques de 64 caracteres
+    lineas = [cuerpo[i:i+64] for i in range(0, len(cuerpo), 64)]
+    llave_final = header + "\n" + "\n".join(lineas) + "\n" + footer
+    return llave_final
 
 # ==========================================
-# 3. CONEXIÓN A GOOGLE SHEETS
+# 3. LÓGICA DE CONEXIÓN Y APP
 # ==========================================
+st.set_page_config(page_title="Gestión Maquinaria", layout="wide")
+st.title("🚜 Sistema de Reportes")
+
 @st.cache_resource
-def conectar_hoja():
+def iniciar_conexion():
     try:
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         info = CREDS_INFO.copy()
-        info["private_key"] = purificar_llave(LLAVE_DE_GOOGLE)
+        # Aquí forzamos la reconstrucción limpia
+        info["private_key"] = reconstruir_llave_limpia(LLAVE_BRUTA)
         
-        credentials = Credentials.from_service_account_info(info, scopes=scope)
-        client = gspread.authorize(credentials)
-        return client.open_by_key(ID_HOJA).sheet1
+        creds = Credentials.from_service_account_info(info, scopes=scope)
+        return gspread.authorize(creds).open_by_key(ID_HOJA).sheet1
     except Exception as e:
         st.error(f"❌ Error de Autenticación: {e}")
         return None
 
-# ==========================================
-# 4. FUNCIÓN GMAIL
-# ==========================================
-def sync_gmail(ids_viejos):
-    try:
-        imap = imaplib.IMAP4_SSL("imap.gmail.com")
-        imap.login(EMAIL_USUARIO, EMAIL_PASSWORD)
-        imap.select("INBOX")
-        _, data = imap.search(None, 'ALL')
-        mail_ids = data[0].split()
-        nuevos = []
-        for m_id in reversed(mail_ids[-10:]): # Solo últimos 10 para rapidez
-            id_s = m_id.decode()
-            if id_s not in ids_viejos:
-                _, m_data = imap.fetch(m_id, "(RFC822)")
-                msg = email.message_from_bytes(m_data[0][1])
-                asunto, enc = decode_header(msg.get("Subject", "Sin Asunto"))[0]
-                if isinstance(asunto, bytes): asunto = asunto.decode(enc or "utf-8")
-                nuevos.append([id_s, asunto, msg.get("From"), ""])
-        imap.logout()
-        return nuevos
-    except: return []
-
-# ==========================================
-# 5. INTERFAZ DE USUARIO (STREAMLIT)
-# ==========================================
-st.set_page_config(page_title="Control Maquinaria", layout="wide")
-st.title("🚜 Sistema de Reportes de Maquinaria")
-
-hoja = conectar_hoja()
+hoja = iniciar_conexion()
 
 if hoja:
-    st.sidebar.success("✅ Conectado a Google Sheets")
+    st.sidebar.success("✅ Conectado")
     
-    # Cargar Datos
+    # Leer datos actuales
     try:
-        raw_data = hoja.get_all_records()
-        df = pd.DataFrame(raw_data)
+        df = pd.DataFrame(hoja.get_all_records())
     except:
         df = pd.DataFrame(columns=["id", "asunto", "de", "comentario"])
 
-    # Botón Sincronizar
+    # Botón Gmail
     if st.button("🔄 Sincronizar con Gmail"):
-        ids_viejos = df['id'].astype(str).tolist() if not df.empty else []
-        nuevos = sync_gmail(ids_viejos)
-        if nuevos:
-            hoja.append_rows(nuevos)
-            st.success(f"¡{len(nuevos)} nuevos reportes!")
-            st.rerun()
-        else:
-            st.info("No hay correos nuevos.")
+        try:
+            imap = imaplib.IMAP4_SSL("imap.gmail.com")
+            imap.login(EMAIL_USUARIO, EMAIL_PASSWORD)
+            imap.select("INBOX")
+            _, data = imap.search(None, 'ALL')
+            ids_viejos = df['id'].astype(str).tolist() if not df.empty else []
+            nuevos = []
+            
+            for m_id in reversed(data[0].split()[-10:]):
+                if m_id.decode() not in ids_viejos:
+                    _, m_data = imap.fetch(m_id, "(RFC822)")
+                    msg = email.message_from_bytes(m_data[0][1])
+                    asunto, enc = decode_header(msg.get("Subject", "Sin Asunto"))[0]
+                    if isinstance(asunto, bytes): asunto = asunto.decode(enc or "utf-8")
+                    nuevos.append([m_id.decode(), asunto, msg.get("From"), ""])
+            
+            if nuevos:
+                hoja.append_rows(nuevos)
+                st.success(f"¡{len(nuevos)} nuevos reportes!")
+                st.rerun()
+            imap.logout()
+        except Exception as e:
+            st.error(f"Error Gmail: {e}")
 
-    # Mostrar Pendientes
+    # Mostrar para editar
     if not df.empty:
         df['comentario'] = df['comentario'].fillna("").astype(str)
         pendientes = df[df['comentario'] == ""]
-        
-        st.subheader(f"Pendientes: {len(pendientes)}")
         for idx, row in pendientes.iterrows():
             with st.expander(f"Reporte: {row['asunto']}"):
-                st.write(f"**De:** {row['de']}")
-                resp = st.text_area("Solución:", key=f"r_{row['id']}")
-                if st.button("Guardar solución ✅", key=f"b_{row['id']}"):
-                    # Fila: idx + 2 (1 por encabezado, 1 por base 1 de Sheets)
-                    hoja.update_cell(idx + 2, 4, resp)
-                    st.success("Guardado.")
+                sol = st.text_area("Solución:", key=f"s_{row['id']}")
+                if st.button("Guardar ✅", key=f"b_{row['id']}"):
+                    hoja.update_cell(idx + 2, 4, sol)
                     st.rerun()
-    else:
-        st.write("La hoja está vacía. Usa el botón de sincronizar.")
