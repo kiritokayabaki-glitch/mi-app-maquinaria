@@ -7,31 +7,33 @@ import plotly.graph_objects as go
 import pandas as pd
 
 # =========================================================
-# CONFIGURACIÓN DE CONEXIÓN (ID YA CONFIGURADO)
+# 1. CONFIGURACIÓN DE CONEXIÓN FORZADA
 # =========================================================
+# Tu ID de hoja extraído de la URL
 ID_HOJA_CALCULO = "1fdCf2HsS8KKkuqrJ8DwiDednW8lwnz7-WfvuVJwQnBo" 
 
-# Creamos la conexión. Automáticamente usará [gcp_service_account] de tus Secrets.
+# Forzamos la conexión para que use los Secrets del bloque [connections.gsheets]
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def cargar_datos_nube():
     try:
-        # Usamos el ID para forzar el modo privado y evitar errores de permisos
+        # Forzamos modo privado con el ID
         return conn.read(spreadsheet=ID_HOJA_CALCULO, worksheet="Sheet1", ttl=0)
     except Exception:
         return pd.DataFrame(columns=["id", "asunto", "de", "cuerpo", "comentario"])
 
 def guardar_datos_nube(df_nuevo):
     try:
-        # Al usar el ID, la librería sabe que debe usar la cuenta de servicio (Editor)
+        # Esta es la función que daba el error "Public Spreadsheet". 
+        # Al usar el ID y la conexión mapeada, se activa el modo Editor.
         conn.update(spreadsheet=ID_HOJA_CALCULO, worksheet="Sheet1", data=df_nuevo)
-        st.success("✅ ¡Cambios guardados en Google Sheets!")
+        st.success("✅ ¡Base de datos actualizada!")
     except Exception as e:
-        st.error(f"Error al guardar: {e}")
-        st.info("Asegúrate de haber compartido el Excel como EDITOR con tu correo de service account.")
+        st.error(f"Error crítico de permisos: {e}")
+        st.info("Verifica: 1. Secrets bloque [connections.gsheets]. 2. Correo Service Account como EDITOR en el Excel.")
 
 # =========================================================
-# CONFIGURACIÓN DE GMAIL (ALERTAS)
+# 2. MOTOR DE GMAIL
 # =========================================================
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
@@ -95,9 +97,9 @@ def leer_contenido_completo(ids_a_buscar):
     except: return []
 
 # =========================================================
-# DISEÑO Y MOTOR AUTOMÁTICO
+# 3. INTERFAZ Y LÓGICA DE CONTROL
 # =========================================================
-st.set_page_config(page_title="Gestión Maquinaria Pro", layout="wide")
+st.set_page_config(page_title="Maquinaria Dash Pro", layout="wide")
 
 if "seccion" not in st.session_state: st.session_state.seccion = "Inicio"
 
@@ -115,40 +117,33 @@ def motor_sincronizacion():
         df_final = pd.concat([df_nuevos, df_actual], ignore_index=True)
         guardar_datos_nube(df_final)
         play_notification_sound()
-        st.toast("🚜 Nuevo reporte recibido", icon="📥")
+        st.toast("🚜 Nuevo reporte detectado", icon="📥")
         st.rerun()
     
     st.session_state.datos_app = df_actual
 
 motor_sincronizacion()
 
-# =========================================================
-# INTERFAZ VISUAL
-# =========================================================
+# --- VISTAS ---
 df = st.session_state.get('datos_app', pd.DataFrame(columns=["id", "asunto", "de", "cuerpo", "comentario"]))
 df['comentario'] = df['comentario'].fillna("")
 pendientes = df[df['comentario'] == ""]
 atendidas = df[df['comentario'] != ""]
 
 with st.sidebar:
-    st.title("🚜 Control")
+    st.title("🚜 Panel")
     if st.button("🏠 Inicio"): st.session_state.seccion = "Inicio"
-    st.write("---")
-    if st.button("🔴 Pendientes"): st.session_state.seccion = "Pendientes"
-    st.write(f"({len(pendientes)})")
-    if st.button("🟢 Atendidas"): st.session_state.seccion = "Atendidas"
-    st.write(f"({len(atendidas)})")
+    if st.button(f"🔴 Pendientes ({len(pendientes)})"): st.session_state.seccion = "Pendientes"
+    if st.button(f"🟢 Atendidas ({len(atendidas)})"): st.session_state.seccion = "Atendidas"
 
 if st.session_state.seccion == "Inicio":
     st.title("📊 Monitor de Maquinaria")
-    c1, c2, c3 = st.columns([1,1,2])
+    c1, c2 = st.columns(2)
     c1.metric("Pendientes", len(pendientes))
     c2.metric("Atendidas", len(atendidas))
     if not df.empty:
-        with c3:
-            fig = go.Figure(data=[go.Pie(labels=['Pendientes', 'Atendidas'], values=[len(pendientes), len(atendidas)], hole=.4)])
-            fig.update_layout(height=250, margin=dict(t=0,b=0,l=0,r=0))
-            st.plotly_chart(fig, use_container_width=True)
+        fig = go.Figure(data=[go.Pie(labels=['Pendientes', 'Atendidas'], values=[len(pendientes), len(atendidas)], hole=.4)])
+        st.plotly_chart(fig)
 
 elif st.session_state.seccion == "Pendientes":
     for index, row in pendientes.iterrows():
@@ -156,7 +151,7 @@ elif st.session_state.seccion == "Pendientes":
         with st.expander(f"⚠️ {row['asunto']}"):
             st.write(f"**De:** {row['de']}")
             st.info(row['cuerpo'])
-            nota = st.text_area("Solución:", key=f"n_{uid}")
+            nota = st.text_area("Nota técnica:", key=f"n_{uid}")
             if st.button("Confirmar ✅", key=f"btn_{uid}"):
                 if nota.strip():
                     df.loc[df['id'].astype(str) == uid, 'comentario'] = nota
