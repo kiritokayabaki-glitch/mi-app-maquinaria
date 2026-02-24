@@ -5,7 +5,7 @@ from email.header import decode_header
 
 # --- CONFIGURACIÓN ---
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
-EMAIL_PASSWORD = "wkpn qayc mtqj ucut" 
+EMAIL_PASSWORD = "wkpn qayc mtqj ucut" # Tu código de 16 letras
 
 def obtener_cuerpo(mensaje):
     cuerpo = ""
@@ -27,11 +27,18 @@ def leer_correos():
     try:
         imap = imaplib.IMAP4_SSL("imap.gmail.com")
         imap.login(EMAIL_USUARIO, EMAIL_PASSWORD)
-        imap.select("INBOX")
+        imap.select("INBOX") # <-- Cambia a "[Gmail]/Todos" si no ves nada
+        
+        # Buscamos TODOS los correos
         status, mensajes = imap.search(None, 'ALL')
         ids = mensajes[0].split()
+        
+        if not ids:
+            return "No se encontraron correos en la bandeja de entrada."
+            
         lista = []
-        for i in reversed(ids[-5:]):
+        # Traemos los últimos 10 para asegurar que algo aparezca
+        for i in reversed(ids[-10:]):
             res, msg = imap.fetch(i, "(RFC822)")
             for respuesta in msg:
                 if isinstance(respuesta, tuple):
@@ -42,47 +49,43 @@ def leer_correos():
                         asunto = asunto.decode(asunto_raw[1] or "utf-8", errors="replace")
                     contenido = obtener_cuerpo(mensaje)
                     lista.append({"Asunto": asunto, "De": mensaje.get("From"), "Cuerpo": contenido})
+        
         imap.logout()
         return lista
-    except Exception as e: return f"Error: {e}"
+    except Exception as e:
+        return f"Error de conexión: {e}"
 
 # --- INTERFAZ ---
 st.set_page_config(page_title="Gestión de Maquinaria", layout="wide")
-st.title("🚜 Control de Notificaciones de Servicio")
+st.title("🚜 Control de Notificaciones")
 
-# Usamos 'session_state' para que los correos no desaparezcan al escribir
-if "correos" not in st.session_state:
-    st.session_state.correos = []
+# Inicializamos el estado si no existe
+if "lista_correos" not in st.session_state:
+    st.session_state.lista_correos = []
 
 if st.button("🔄 Sincronizar con Gmail"):
-    st.session_state.correos = leer_correos()
+    with st.spinner("Conectando con Gmail..."):
+        resultado = leer_correos()
+        if isinstance(resultado, list):
+            st.session_state.lista_correos = resultado
+            if not resultado:
+                st.warning("La conexión fue exitosa, pero la carpeta está vacía.")
+        else:
+            st.error(resultado)
 
-if isinstance(st.session_state.correos, list):
-    for idx, item in enumerate(st.session_state.correos):
-        with st.expander(f"📋 {item['Asunto']}", expanded=True):
-            col_info, col_accion = st.columns([2, 1])
-            
-            with col_info:
-                st.write(f"**Remitente:** {item['De']}")
-                st.info(f"**Detalle:** {item['Cuerpo']}")
-            
-            with col_accion:
-                # --- LÓGICA DE ESTADO ---
-                comentario = st.text_area("Escribir comentario de atención:", key=f"coment_{idx}")
-                
-                if comentario.strip() == "":
-                    st.error("🔴 Estado: PENDIENTE")
-                    atendida = False
+# Mostrar los correos guardados en el estado
+if st.session_state.lista_correos:
+    for idx, item in enumerate(st.session_state.lista_correos):
+        with st.expander(f"📋 {item['Asunto']}", expanded=(idx == 0)):
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                st.write(f"**De:** {item['De']}")
+                st.info(f"**Mensaje:**\n{item['Cuerpo']}")
+            with col2:
+                comentario = st.text_area("Comentario de atención:", key=f"c_{idx}")
+                if comentario.strip():
+                    st.success("🟢 ATENDIDA")
+                    st.checkbox("Notificación atendida", value=True, key=f"ch_{idx}")
                 else:
-                    st.success("🟢 Estado: ATENDIDA")
-                    atendida = st.checkbox("Confirmar notificación atendida", value=True, key=f"check_{idx}")
-                
-                st.file_uploader("Adjuntar evidencia (foto)", key=f"foto_{idx}")
-                
-                if st.button("💾 Guardar Reporte", key=f"btn_{idx}"):
-                    if comentario:
-                        st.balloons()
-                        st.toast(f"Reporte de '{item['Asunto']}' guardado con éxito.")
-                    else:
-                        st.warning("Debes agregar un comentario para finalizar.")
+                    st.error("🔴 PENDIENTE")
             st.divider()
