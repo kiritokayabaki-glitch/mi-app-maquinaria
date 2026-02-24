@@ -7,13 +7,13 @@ import email
 from email.header import decode_header
 
 # ==========================================
-# 1. DATOS DE CONFIGURACIÓN
+# 1. CONFIGURACIÓN
 # ==========================================
 ID_HOJA = "1fdCf2HsS8KKkuqrJ8DwiDednW8lwnz7-WfvuVJwQnBo"
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
 
-# PEGA AQUÍ TU LLAVE COMPLETA ENTRE LAS TRIPLES COMILLAS
+# PEGA AQUÍ TU LLAVE. No importa si es una sola línea larga o tiene \n
 LLAVE_BRUTA = """-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCxmiHe70esGUZV
 vHiu5lfQfNWalqAMPb1IMU66QG9eRy/TnEbFn68bKX94HYSwG7Y2WRvZcmE/rVr6
@@ -43,6 +43,7 @@ UOyfuLcW4zAHZaTT/gUcszZPzLiYWWdpUdr7OJXxAoGBAJNE93RrgdH8I4eJyjtj
 U5EQz8kl3+kywoTTSEI150ZA
 -----END PRIVATE KEY-----"""
 
+# --- NO TOCAR ESTE DICCIONARIO ---
 CREDS_INFO = {
   "type": "service_account",
   "project_id": "notificaciones-82eaf",
@@ -57,58 +58,57 @@ CREDS_INFO = {
 }
 
 # ==========================================
-# 2. PROCESADOR DE LLAVE
-# ==========================================
-def preparar_llave(llave_recibida):
-    # Reemplazamos los \n literales por saltos de línea reales
-    llave = llave_recibida.replace("\\n", "\n")
-    # Limpiamos espacios accidentales
-    return llave.strip()
-
-# ==========================================
-# 3. CONEXIÓN Y APP
+# 2. PROCESO DE AUTENTICACIÓN
 # ==========================================
 st.set_page_config(page_title="Gestión Maquinaria", layout="wide")
-st.title("🚜 Sistema de Reportes")
+st.title("🚜 Control de Mantenimiento")
 
 @st.cache_resource
-def iniciar_conexion():
+def obtener_cliente():
     try:
-        scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        # Limpieza definitiva de la llave
+        key = LLAVE_BRUTA.strip()
+        # Si la llave tiene los \n como texto, los convertimos a saltos reales
+        if "\\n" in key:
+            key = key.replace("\\n", "\n")
+            
         info = CREDS_INFO.copy()
-        info["private_key"] = preparar_llave(LLAVE_BRUTA)
+        info["private_key"] = key
         
+        scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(info, scopes=scope)
-        client = gspread.authorize(creds)
-        return client.open_by_key(ID_HOJA).sheet1
+        return gspread.authorize(creds).open_by_key(ID_HOJA).sheet1
     except Exception as e:
-        st.error(f"❌ Error de Autenticación: {e}")
+        st.error(f"❌ Error Crítico: {e}")
         return None
 
-hoja = iniciar_conexion()
+hoja = obtener_cliente()
 
+# ==========================================
+# 3. LÓGICA DE LA APP
+# ==========================================
 if hoja:
-    st.sidebar.success("✅ Conectado con éxito")
+    st.sidebar.success("✅ Conectado a la Base de Datos")
     
-    # Intentar leer datos
     try:
-        records = hoja.get_all_records()
-        df = pd.DataFrame(records)
+        data = hoja.get_all_records()
+        df = pd.DataFrame(data)
     except:
         df = pd.DataFrame(columns=["id", "asunto", "de", "comentario"])
 
-    # Botón Gmail
-    if st.button("🔄 Sincronizar"):
+    # Botón Sincronizar Gmail
+    if st.button("🔄 Sincronizar Reportes"):
         try:
             imap = imaplib.IMAP4_SSL("imap.gmail.com")
             imap.login(EMAIL_USUARIO, EMAIL_PASSWORD)
             imap.select("INBOX")
-            _, data = imap.search(None, 'ALL')
-            ids_viejos = df['id'].astype(str).tolist() if not df.empty else []
+            _, response = imap.search(None, 'ALL')
+            
+            ids_existentes = df['id'].astype(str).tolist() if not df.empty else []
             nuevos = []
             
-            for m_id in reversed(data[0].split()[-10:]):
-                if m_id.decode() not in ids_viejos:
+            for m_id in reversed(response[0].split()[-10:]):
+                if m_id.decode() not in ids_existentes:
                     _, m_data = imap.fetch(m_id, "(RFC822)")
                     msg = email.message_from_bytes(m_data[0][1])
                     asunto, enc = decode_header(msg.get("Subject", "Sin Asunto"))[0]
@@ -117,20 +117,22 @@ if hoja:
             
             if nuevos:
                 hoja.append_rows(nuevos)
-                st.success(f"¡{len(nuevos)} nuevos reportes!")
+                st.success(f"¡{len(nuevos)} reportes nuevos!")
                 st.rerun()
             imap.logout()
         except Exception as e:
-            st.error(f"Error Gmail: {e}")
+            st.error(f"Error de Gmail: {e}")
 
-    # Mostrar para editar
+    # Mostrar pendientes
     if not df.empty:
         df['comentario'] = df['comentario'].fillna("").astype(str)
         pendientes = df[df['comentario'] == ""]
+        
         for idx, row in pendientes.iterrows():
             with st.expander(f"Reporte: {row['asunto']}"):
                 sol = st.text_area("Solución:", key=f"s_{row['id']}")
                 if st.button("Guardar ✅", key=f"b_{row['id']}"):
-                    # Fila: idx + 2 (1 por encabezado + 1 por base-1)
                     hoja.update_cell(idx + 2, 4, sol)
                     st.rerun()
+    else:
+        st.info("Presiona sincronizar para cargar datos.")
