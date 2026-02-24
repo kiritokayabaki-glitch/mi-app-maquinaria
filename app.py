@@ -1,108 +1,88 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
-import pandas as pd
 import imaplib
 import email
 from email.header import decode_header
+import pandas as pd
 
-# =========================================================
-# 1. FUNCIÓN LIMPIADORA (PARA MATAR EL ERROR 95)
-# =========================================================
-def limpiar_credenciales():
-    """Esta función arregla la llave PEM aunque esté mal pegada en Secrets"""
-    try:
-        creds = dict(st.secrets["connections"]["gsheets"])
-        # Limpiamos la llave de cualquier carácter invisible o error de pegado
-        key = creds["private_key"]
-        if "\\n" in key:
-            key = key.replace("\\n", "\n")
-        
-        # Eliminamos espacios en blanco accidentales al inicio/final de cada línea
-        lineas = [linea.strip() for linea in key.split("\n") if linea.strip()]
-        key_limpia = "\n".join(lineas)
-        
-        # Reinyectamos la llave limpia en la configuración de la conexión
-        creds["private_key"] = key_limpia
-        return creds
-    except Exception as e:
-        st.error(f"Error accediendo a Secrets: {e}")
-        return None
-
-# =========================================================
-# 2. CONFIGURACIÓN DE CONEXIÓN
-# =========================================================
+# CONFIGURACIÓN
 ID_HOJA = "1fdCf2HsS8KKkuqrJ8DwiDednW8lwnz7-WfvuVJwQnBo"
-st.set_page_config(page_title="Maquinaria Dash", layout="wide")
-
-try:
-    # Usamos la conexión pero le pasamos las credenciales ya limpias
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    df = conn.read(spreadsheet=ID_HOJA, worksheet="Sheet1", ttl=0)
-    st.success("✅ ¡CONEXIÓN EXITOSA!")
-except Exception as e:
-    st.error(f"Error de conexión: {e}")
-    st.info("Si el error persiste, verifica que el correo del Service Account sea EDITOR en el Excel.")
-    df = pd.DataFrame()
-
-# =========================================================
-# 3. MOTOR DE GMAIL
-# =========================================================
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
 
-def buscar_correos():
+st.set_page_config(page_title="Control de Maquinaria", layout="wide")
+
+# 1. CONEXIÓN A GOOGLE SHEETS
+try:
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    df = conn.read(spreadsheet=ID_HOJA, worksheet="Sheet1", ttl=0)
+    st.sidebar.success("✅ Conectado a Google Sheets")
+except Exception as e:
+    st.error(f"Error de conexión: {e}")
+    df = pd.DataFrame(columns=["id", "asunto", "de", "comentario"])
+
+# 2. FUNCIÓN PARA BUSCAR CORREOS NUEVOS
+def sincronizar_correos():
     try:
         imap = imaplib.IMAP4_SSL("imap.gmail.com")
         imap.login(EMAIL_USUARIO, EMAIL_PASSWORD)
-        imap.select("INBOX", readonly=True)
+        imap.select("INBOX")
         _, mensajes = imap.search(None, 'ALL')
-        ids = [i.decode() for i in mensajes[0].split()]
+        ids = mensajes[0].split()
         
-        lista = []
-        for i in reversed(ids[-5:]): # Solo los últimos 5
-            res, msg = imap.fetch(i, "(RFC822)")
-            for respuesta in msg:
-                if isinstance(respuesta, tuple):
-                    mensaje = email.message_from_bytes(respuesta[1])
-                    asunto_raw = decode_header(mensaje.get("Subject", "Sin Asunto"))[0]
-                    asunto = asunto_raw[0].decode(asunto_raw[1] or "utf-8") if isinstance(asunto_raw[0], bytes) else asunto_raw[0]
-                    lista.append({"id": i, "asunto": asunto, "de": mensaje.get("From"), "comentario": ""})
+        lista_nuevos = []
+        # Ver los últimos 5 correos
+        for i in reversed(ids[-5:]):
+            idx_str = i.decode()
+            # Si el ID del correo no está en nuestro Excel, es nuevo
+            if df.empty or idx_str not in df['id'].astype(str).values:
+                res, msg = imap.fetch(i, "(RFC822)")
+                for respuesta in msg:
+                    if isinstance(respuesta, tuple):
+                        mensaje = email.message_from_bytes(respuesta[1])
+                        asunto, encoding = decode_header(mensaje.get("Subject", "Sin Asunto"))[0]
+                        if isinstance(asunto, bytes): asunto = asunto.decode(encoding or "utf-8")
+                        
+                        lista_nuevos.append({
+                            "id": idx_str,
+                            "asunto": asunto,
+                            "de": mensaje.get("From"),
+                            "comentario": ""
+                        })
         imap.logout()
-        return lista
-    except: return []
+        return lista_nuevos
+    except Exception as e:
+        st.sidebar.error(f"Error Gmail: {e}")
+        return []
 
-# =========================================================
-# 4. INTERFAZ
-# =========================================================
+# 3. LÓGICA DE ACTUALIZACIÓN
 st.title("🚜 Gestión de Mantenimiento")
 
-if not df.empty:
-    # Sincronización automática con Gmail
-    ids_en_excel = df['id'].astype(str).tolist()
-    nuevos = [c for c in buscar_correos() if str(c['id']) not in ids_en_excel]
-    
+# Botón para forzar actualización
+if st.button("🔄 Sincronizar nuevos reportes"):
+    nuevos = sincronizar_correos()
     if nuevos:
-        df_nuevos = pd.DataFrame(nuevos)
-        df_final = pd.concat([df_nuevos, df], ignore_index=True)
-        conn.update(spreadsheet=ID_HOJA, worksheet="Sheet1", data=df_final)
+        df_actualizado = pd.concat([pd.DataFrame(nuevos), df], ignore_index=True)
+        conn.update(spreadsheet=ID_HOJA, worksheet="Sheet1", data=df_actualizado)
+        st.success(f"Se encontraron {len(nuevos)} reportes nuevos.")
         st.rerun()
+    else:
+        st.info("No hay correos nuevos.")
 
-    # Filtros y Visualización
+# 4. INTERFAZ DE TRABAJO
+if not df.empty:
     df['comentario'] = df['comentario'].fillna("")
     pendientes = df[df['comentario'] == ""]
     
-    col1, col2 = st.columns(2)
-    col1.metric("Pendientes", len(pendientes))
-    col2.metric("Total", len(df))
-
-    st.write("### 📝 Lista de Pendientes")
+    st.subheader(f"Pendientes de revisión: {len(pendientes)}")
+    
     for idx, row in pendientes.iterrows():
-        with st.expander(f"Reporte: {row['asunto']}"):
-            st.write(f"**De:** {row['de']}")
-            nota = st.text_area("Añadir solución:", key=f"txt_{row['id']}")
-            if st.button("Finalizar ✅", key=f"btn_{row['id']}"):
-                df.loc[df['id'] == row['id'], 'comentario'] = nota
+        with st.expander(f"Reporte: {row['asunto']} (Enviado por: {row['de']})"):
+            solucion = st.text_area("Escribe la solución técnica:", key=f"sol_{row['id']}")
+            if st.button("Marcar como Reparado ✅", key=f"btn_{row['id']}"):
+                df.loc[df['id'] == row['id'], 'comentario'] = solucion
                 conn.update(spreadsheet=ID_HOJA, worksheet="Sheet1", data=df)
+                st.balloons()
                 st.rerun()
 else:
-    st.warning("No se pudieron cargar datos. Revisa la configuración de Google Sheets.")
+    st.write("No hay datos para mostrar. Asegúrate de que el Excel tenga las columnas: id, asunto, de, comentario.")
