@@ -2,12 +2,13 @@ import streamlit as st
 import imaplib
 import email
 from email.header import decode_header
+import plotly.graph_objects as go # <-- Nueva pieza del rompecabezas
 
 # --- CONFIGURACIÓN ---
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
 
-# --- FUNCIONES DE DATOS ---
+# --- FUNCIONES DE DATOS (Sin cambios) ---
 def decodificar_texto(texto, encoding):
     try:
         if isinstance(texto, bytes):
@@ -26,8 +27,7 @@ def obtener_cuerpo(mensaje):
                     break
                 except: pass
     else:
-        try:
-            cuerpo = mensaje.get_payload(decode=True).decode("utf-8", errors="replace")
+        try: cuerpo = mensaje.get_payload(decode=True).decode("utf-8", errors="replace")
         except: pass
     return cuerpo[:800]
 
@@ -55,12 +55,7 @@ def leer_contenido_completo(ids_a_buscar):
                     asunto_raw = decode_header(mensaje.get("Subject", "Sin Asunto"))[0]
                     asunto = decodificar_texto(asunto_raw[0], asunto_raw[1])
                     cuerpo = obtener_cuerpo(mensaje)
-                    lista.append({
-                        "id": i, 
-                        "Asunto": asunto, 
-                        "De": mensaje.get("From"),
-                        "Cuerpo": cuerpo
-                    })
+                    lista.append({"id": i, "Asunto": asunto, "De": mensaje.get("From"), "Cuerpo": cuerpo})
         imap.logout()
         return lista
     except: return []
@@ -68,7 +63,7 @@ def leer_contenido_completo(ids_a_buscar):
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Maquinaria Dash Pro", layout="wide")
 
-# --- CSS (Mantiene el estilo de tus botones y badges) ---
+# --- CSS (Mantiene tus badges y botones) ---
 st.markdown("""
     <style>
     .stButton > button { width: 100%; border-radius: 8px; height: 3.5em; background-color: #f0f2f6; color: #1f1f1f !important; font-weight: 600; }
@@ -102,36 +97,46 @@ with st.sidebar:
 # --- PANTALLAS ---
 if st.session_state.seccion == "Inicio":
     st.title("📊 Resumen de Tareas")
-    col1, col2 = st.columns(2)
-    col1.metric("Pendientes", len(pendientes))
-    col2.metric("Atendidas", len(atendidas))
+    
+    col_met1, col_met2, col_graf = st.columns([1, 1, 2])
+    
+    with col_met1:
+        st.metric("🔴 Pendientes", len(pendientes))
+    with col_met2:
+        st.metric("🟢 Atendidas", len(atendidas))
+    
+    with col_graf:
+        if len(st.session_state.lista_correos) > 0:
+            # Gráfica con efecto de profundidad (Pull)
+            fig = go.Figure(data=[go.Pie(
+                labels=['Pendientes', 'Atendidas'], 
+                values=[len(pendientes), len(atendidas)],
+                hole=.4,
+                marker_colors=['#ffc1c1', '#c1f2c1'],
+                textinfo='percent',
+                pull=[0.1, 0] # Este hace que la parte roja resalte hacia afuera
+            )])
+            fig.update_layout(showlegend=True, height=300, margin=dict(t=0, b=0, l=0, r=0))
+            st.plotly_chart(fig, use_container_width=True)
 
 elif st.session_state.seccion == "Pendientes":
     st.title("🔴 Notificaciones Pendientes")
     for item in pendientes:
         uid = item['id']
-        with st.expander(f"⚠️ {item['Asunto']}"):
-            st.write(f"**De:** {item['De']}")
-            
-            # PROTECCIÓN: Si no hay cuerpo, muestra aviso en lugar de error
-            cuerpo_txt = item.get('Cuerpo', "Contenido no disponible. Por favor, actualice la lista.")
-            st.info(f"**Cuerpo del Correo:**\n\n{cuerpo_txt}")
-            
+        with st.expander(f"⚠️ {item.get('Asunto')}"):
+            st.write(f"**De:** {item.get('De')}")
+            st.info(f"**Cuerpo del Correo:**\n\n{item.get('Cuerpo', 'Sin contenido')}")
             coment = st.text_area("Registrar nota:", key=f"in_{uid}")
             
             c1, c2 = st.columns(2)
             with c1:
-                st.markdown("**🖼️ Anteriormente-Imagen**")
-                foto_ant = st.file_uploader("Subir antes", key=f"u_ant_{uid}", label_visibility="collapsed")
-                if foto_ant:
-                    st.image(foto_ant, width=250) 
-                    st.session_state.db_fotos[f"ant_{uid}"] = foto_ant
+                st.markdown("**🖼️ Anteriormente**")
+                foto_ant = st.file_uploader("Subir", key=f"u_ant_{uid}", label_visibility="collapsed")
+                if foto_ant: st.image(foto_ant, width=250); st.session_state.db_fotos[f"ant_{uid}"] = foto_ant
             with c2:
-                st.markdown("**📸 Actual-Imagen**")
-                foto_act = st.file_uploader("Subir actual", key=f"u_act_{uid}", label_visibility="collapsed")
-                if foto_act:
-                    st.image(foto_act, width=250)
-                    st.session_state.db_fotos[f"act_{uid}"] = foto_act
+                st.markdown("**📸 Actual**")
+                foto_act = st.file_uploader("Subir", key=f"u_act_{uid}", label_visibility="collapsed")
+                if foto_act: st.image(foto_act, width=250); st.session_state.db_fotos[f"act_{uid}"] = foto_act
             
             if st.button("Confirmar Atención ✅", key=f"sv_{uid}"):
                 if coment.strip():
@@ -142,14 +147,10 @@ elif st.session_state.seccion == "Atendidas":
     st.title("🟢 Historial de Atendidas")
     for item in atendidas:
         uid = item['id']
-        with st.expander(f"✅ {item['Asunto']}"):
-            st.write(f"**De:** {item['De']}")
-            
-            # PROTECCIÓN: Si no hay cuerpo, muestra aviso en lugar de error
-            cuerpo_txt = item.get('Cuerpo', "Contenido no disponible.")
-            st.info(f"**Cuerpo del Correo:**\n\n{cuerpo_txt}")
-            
-            st.success(f"**Nota de atención:** {st.session_state.db_comentarios.get(uid)}")
+        with st.expander(f"✅ {item.get('Asunto')}"):
+            st.write(f"**De:** {item.get('De')}")
+            st.info(f"**Cuerpo:**\n\n{item.get('Cuerpo', 'Sin contenido')}")
+            st.success(f"**Nota:** {st.session_state.db_comentarios.get(uid)}")
             
             c1, c2 = st.columns(2)
             with c1:
@@ -159,6 +160,6 @@ elif st.session_state.seccion == "Atendidas":
                 if f"act_{uid}" in st.session_state.db_fotos:
                     st.image(st.session_state.db_fotos[f"act_{uid}"], width=200)
             
-            if st.button("Reabrir Notificación 🔓", key=f"re_{uid}"):
+            if st.button("Reabrir 🔓", key=f"re_{uid}"):
                 st.session_state.db_comentarios.pop(uid)
                 st.rerun()
