@@ -64,7 +64,6 @@ if st.button("🔄 Sincronizar Órdenes de Servicio"):
 if st.session_state.lista_correos:
     for idx, item in enumerate(st.session_state.lista_correos):
         with st.expander(f"📋 ORDEN: {item['Asunto']}", expanded=True):
-            # Dividimos en dos columnas principales
             col_info, col_registro = st.columns([1, 1])
             
             with col_info:
@@ -74,4 +73,28 @@ if st.session_state.lista_correos:
             
             with col_registro:
                 st.subheader("Registro de Atención")
-                comentario = st.text_area("Comentarios del Técnico:", key=f"c_{idx}", placeholder
+                # LÍNEA CORREGIDA AQUÍ ABAJO:
+                comentario = st.text_area("Comentarios del Técnico:", key=f"c_{idx}", placeholder="Escribe aquí el reporte...")
+                
+                if comentario.strip():
+                    st.success("🟢 ESTADO: ATENDIDA")
+                else:
+                    st.error("🔴 ESTADO: PENDIENTE")
+                
+                st.write("**Evidencia Visual:**")
+                col_img1, col_img2 = st.columns(2)
+                with col_img1:
+                    foto_antes = st.file_uploader("🖼️ Anteriormente-Imagen", type=['png', 'jpg', 'jpeg'], key=f"img_ant_{idx}")
+                    if foto_antes: st.image(foto_antes, caption="Vista Anterior")
+                
+                with col_img2:
+                    foto_despues = st.file_uploader("📸 Actual-Imagen", type=['png', 'jpg', 'jpeg'], key=f"img_act_{idx}")
+                    if foto_despues: st.image(foto_despues, caption="Vista Actual")
+                
+                if st.button("💾 Guardar Reporte Final", key=f"btn_{idx}"):
+                    if comentario:
+                        st.balloons()
+                        st.success(f"Reporte de '{item['Asunto']}' listo para procesar.")
+                    else:
+                        st.warning("Agrega un comentario antes de guardar.")
+            st.divider()
