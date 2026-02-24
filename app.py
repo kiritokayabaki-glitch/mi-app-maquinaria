@@ -5,14 +5,16 @@ from google.oauth2.service_account import Credentials
 import imaplib
 import email
 from email.header import decode_header
+import json
 
-# --- TUS DATOS NUEVOS ---
+# --- CONFIGURACIÓN ---
 ID_HOJA = "1fdCf2HsS8KKkuqrJ8DwiDednW8lwnz7-WfvuVJwQnBo"
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
 
-# Estructura de credenciales con tu llave nueva
-CREDS_INFO = {
+# --- PEGA TU JSON COMPLETO AQUÍ ---
+# Abre tu archivo .json descargado, copia TODO el contenido y pégalo entre las comillas
+JSON_DATA = {
   "type": "service_account",
   "project_id": "notificaciones-82eaf",
   "private_key_id": "f698b836b566c626ce08d06cf5d6062909a1341f",
@@ -26,14 +28,14 @@ CREDS_INFO = {
   "universe_domain": "googleapis.com"
 }
 
-st.set_page_config(page_title="Control Maquinaria", layout="wide")
-st.title("🚜 Gestión de Mantenimiento")
+st.set_page_config(page_title="Gestión Maquinaria", layout="wide")
 
 @st.cache_resource
 def conectar():
     try:
-        # Convertimos los \n de texto en saltos de línea reales para la librería
-        info = CREDS_INFO.copy()
+        # Copiamos para no alterar el original
+        info = JSON_DATA.copy()
+        # Reparamos los saltos de línea \n que se vuelven texto
         info["private_key"] = info["private_key"].replace("\\n", "\n")
         
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -44,59 +46,25 @@ def conectar():
         st.error(f"❌ Error de Conexión: {e}")
         return None
 
+# --- LÓGICA PRINCIPAL ---
+st.title("🚜 Panel de Control")
 hoja = conectar()
 
 if hoja:
-    st.sidebar.success("✅ Conectado a Google Sheets")
-    
-    # Obtener datos y asegurar que el ID sea string para comparar
-    data = hoja.get_all_records()
-    df = pd.DataFrame(data)
-
-    # Lógica de Sincronización Gmail
-    if st.button("🔄 Sincronizar Reportes de Gmail"):
-        try:
-            imap = imaplib.IMAP4_SSL("imap.gmail.com")
-            imap.login(EMAIL_USUARIO, EMAIL_PASSWORD)
-            imap.select("INBOX")
-            _, msg_ids = imap.search(None, 'ALL')
-            
-            existentes = df['id'].astype(str).tolist() if not df.empty else []
-            nuevos_datos = []
-            
-            for m_id in reversed(msg_ids[0].split()[-10:]):
-                id_str = m_id.decode()
-                if id_str not in existentes:
-                    _, msg_data = imap.fetch(m_id, "(RFC822)")
-                    raw_email = msg_data[0][1]
-                    msg = email.message_from_bytes(raw_email)
-                    asunto, encoding = decode_header(msg.get("Subject", "Sin Asunto"))[0]
-                    if isinstance(asunto, bytes): asunto = asunto.decode(encoding or "utf-8")
-                    nuevos_datos.append([id_str, asunto, msg.get("From"), ""])
-            
-            if nuevos_datos:
-                hoja.append_rows(nuevos_datos)
-                st.success(f"¡Se agregaron {len(nuevos_datos)} reportes!")
-                st.rerun()
-            else:
-                st.info("No hay correos nuevos.")
-            imap.logout()
-        except Exception as e:
-            st.error(f"Error Gmail: {e}")
-
-    # Mostrar lista de pendientes
-    if not df.empty:
-        df['comentario'] = df['comentario'].fillna("").astype(str)
-        pendientes = df[df['comentario'] == ""]
+    st.success("✅ ¡CONECTADO EXITOSAMENTE!")
+    # Leer datos
+    try:
+        data = hoja.get_all_records()
+        df = pd.DataFrame(data)
         
-        st.subheader(f"📋 Reportes Pendientes ({len(pendientes)})")
-        for idx, row in pendientes.iterrows():
-            with st.expander(f"Asunto: {row['asunto']} | De: {row['de']}"):
-                solucion = st.text_area("Describa la reparación:", key=f"sol_{row['id']}")
-                if st.button("Finalizar Reporte ✅", key=f"btn_{row['id']}"):
-                    # Fila = índice + 2 (1 por encabezado y 1 porque Sheets empieza en 1)
-                    hoja.update_cell(idx + 2, 4, solucion)
-                    st.success("Guardado en la nube")
-                    st.rerun()
-    else:
-        st.info("La hoja está vacía. Presiona Sincronizar para buscar correos.")
+        if st.button("🔄 Sincronizar"):
+            # Aquí iría tu función de Gmail (la que ya tienes)
+            st.info("Buscando correos...")
+            
+        if not df.empty:
+            st.dataframe(df)
+        else:
+            st.write("Conectado, pero la hoja no tiene datos.")
+            
+    except Exception as e:
+        st.error(f"Error al leer datos: {e}")
