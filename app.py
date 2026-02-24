@@ -7,7 +7,7 @@ from email.header import decode_header
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
 
-# --- FUNCIONES DE DATOS (Mantenemos las anteriores) ---
+# --- FUNCIONES DE DATOS ---
 def buscar_ids_recientes():
     try:
         imap = imaplib.IMAP4_SSL("imap.gmail.com")
@@ -15,7 +15,7 @@ def buscar_ids_recientes():
         imap.select("INBOX", readonly=True)
         status, mensajes = imap.search(None, 'ALL')
         ids = mensajes[0].split()
-        return [i.decode() for i in ids[-15:]] # Aumentamos a 15 para tener más datos
+        return [i.decode() for i in ids[-15:]]
     except: return []
 
 def leer_contenido_completo(ids_a_buscar):
@@ -39,28 +39,52 @@ def leer_contenido_completo(ids_a_buscar):
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Maquinaria Dash Pro", layout="wide")
 
-# Estilo CSS para imitar la imagen que subiste
+# --- CSS MEJORADO PARA LEGIBILIDAD ---
 st.markdown("""
     <style>
+    /* Estilo general de los botones del menú */
     .stButton > button {
         width: 100%;
-        border-radius: 5px;
-        height: 3em;
+        border-radius: 8px;
+        height: 3.5em;
         background-color: #f0f2f6;
-        border: none;
+        color: #1f1f1f !important; /* Texto oscuro para que se lea bien */
+        border: 1px solid #d1d5db;
         text-align: left;
-        padding-left: 20px;
+        padding-left: 15px;
+        font-weight: 600;
+        font-size: 16px;
     }
-    .badge {
-        float: right;
-        background-color: #e0e0e0;
-        color: #31333F;
-        padding: 2px 8px;
-        border-radius: 10px;
+    
+    /* Efecto al pasar el mouse */
+    .stButton > button:hover {
+        background-color: #e5e7eb;
+        border-color: #9ca3af;
+    }
+
+    /* Burbujas de contador (Badges) */
+    .badge-container {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        width: 100%;
+        margin-top: -48px; /* Ajuste para quedar sobre el botón */
+        margin-bottom: 20px;
+        padding: 0 15px;
+        pointer-events: none; /* Para que el clic pase al botón de abajo */
+    }
+    
+    .badge-text {
         font-weight: bold;
-        font-size: 0.8em;
-        margin-top: 2px;
+        padding: 2px 10px;
+        border-radius: 12px;
+        font-size: 14px;
+        color: #1f1f1f; /* Texto del número en oscuro */
+        border: 1px solid rgba(0,0,0,0.1);
     }
+    
+    .bg-pendientes { background-color: #ffc1c1; }
+    .bg-atendidas { background-color: #c1f2c1; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -72,72 +96,65 @@ if "lista_correos" not in st.session_state:
 if "seccion" not in st.session_state:
     st.session_state.seccion = "Inicio"
 
-# Fragmento para actualización silenciosa
-@st.fragment(run_every="30s")
-def auto_sync():
-    ids = buscar_ids_recientes()
-    # Solo actualizamos si hay correos nuevos
-    actuales = [c['id'] for c in st.session_state.lista_correos]
-    if any(i not in actuales for i in ids):
-        st.session_state.lista_correos = leer_contenido_completo(ids)
-        st.rerun()
-
-auto_sync()
-
 # --- LÓGICA DE FILTROS ---
 pendientes = [c for c in st.session_state.lista_correos if not st.session_state.db_comentarios.get(c['id'], "").strip()]
 atendidas = [c for c in st.session_state.lista_correos if st.session_state.db_comentarios.get(c['id'], "").strip()]
 
-# --- BARRA LATERAL ESTILO "APP" ---
+# --- BARRA LATERAL ---
 with st.sidebar:
-    st.title("🚜 Menú")
+    st.markdown("### 🚜 Menú de Gestión")
     
     # Botón Inicio
-    if st.button("🏠 Inicio"):
+    if st.button("🏠 Inicio", key="nav_home"):
         st.session_state.seccion = "Inicio"
     
-    # Botón Pendientes con contador (Estilo tu imagen)
-    # Usamos markdown para el texto con badge
-    label_pend = f"🔴 Pendientes <span class='badge'>{len(pendientes)}</span>"
-    if st.button("🔴 Pendientes", key="btn_p"):
-        st.session_state.seccion = "Pendientes"
-    st.markdown(f"<div style='margin-top:-45px; margin-bottom:20px; pointer-events:none;'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span style='float:right; background:#f8d7da; padding:2px 10px; border-radius:10px;'>{len(pendientes)}</span></div>", unsafe_allow_html=True)
+    st.write("") # Espaciador
 
-    # Botón Atendidas con contador
-    if st.button("🟢 Atendidas", key="btn_a"):
+    # Botón Pendientes
+    if st.button("🔴 Pendientes", key="nav_pend"):
+        st.session_state.seccion = "Pendientes"
+    st.markdown(f"""
+        <div class="badge-container">
+            <span></span>
+            <span class="badge-text bg-pendientes">{len(pendientes)}</span>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # Botón Atendidas
+    if st.button("🟢 Atendidas", key="nav_atend"):
         st.session_state.seccion = "Atendidas"
-    st.markdown(f"<div style='margin-top:-45px; margin-bottom:20px; pointer-events:none;'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span style='float:right; background:#d4edda; padding:2px 10px; border-radius:10px;'>{len(atendidas)}</span></div>", unsafe_allow_html=True)
+    st.markdown(f"""
+        <div class="badge-container">
+            <span></span>
+            <span class="badge-text bg-atendidas">{len(atendidas)}</span>
+        </div>
+    """, unsafe_allow_html=True)
 
 # --- PANTALLAS ---
 if st.session_state.seccion == "Inicio":
-    st.title("📊 Resumen de Notificaciones")
-    c1, c2 = st.columns(2)
-    c1.metric("Por Atender", len(pendientes), delta_color="inverse")
-    c2.metric("Completadas", len(atendidas))
-    
-    st.info("Selecciona una categoría en el menú de la izquierda para comenzar a trabajar.")
+    st.title("📊 Resumen de Tareas")
+    col1, col2 = st.columns(2)
+    col1.metric("Pendientes", len(pendientes))
+    col2.metric("Atendidas", len(atendidas))
+    st.info("Utilice el menú lateral para navegar entre las órdenes.")
 
 elif st.session_state.seccion == "Pendientes":
-    st.title("🔴 Notificaciones Pendientes")
+    st.title("🔴 Órdenes por Atender")
     for item in pendientes:
         with st.container(border=True):
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                st.subheader(item['Asunto'])
-                st.write(f"De: {item['De']}")
-            with col2:
-                coment = st.text_area("Comentario de atención", key=f"input_{item['id']}")
-                if st.button("Confirmar Atención ✅", key=f"save_{item['id']}"):
-                    if coment.strip():
-                        st.session_state.db_comentarios[item['id']] = coment
-                        st.success("¡Atendida!")
-                        st.rerun()
-                    else:
-                        st.warning("Escribe un comentario primero.")
+            st.subheader(item['Asunto'])
+            st.write(f"**De:** {item['De']}")
+            coment = st.text_area("Agregar nota de inspección", key=f"in_{item['id']}")
+            if st.button("Marcar como Atendida ✅", key=f"sv_{item['id']}"):
+                if coment.strip():
+                    st.session_state.db_comentarios[item['id']] = coment
+                    st.rerun()
 
 elif st.session_state.seccion == "Atendidas":
-    st.title("🟢 Notificaciones Atendidas")
+    st.title("🟢 Historial de Atendidas")
     for item in atendidas:
         with st.expander(f"✅ {item['Asunto']}"):
-            st.write(f"**Atendido el:** {st.session_state.db_comentarios.get(item['id'])}")
-            st.button("Reabrir Notificación 🔓", key=f"reopen_{item['id']}", on_click=lambda id=item['id']: st.session_state.db_comentarios.pop(id))
+            st.write(f"**Nota:** {st.session_state.db_comentarios.get(item['id'])}")
+            if st.button("Reabrir", key=f"re_{item['id']}"):
+                st.session_state.db_comentarios.pop(item['id'])
+                st.rerun()
