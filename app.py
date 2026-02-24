@@ -1,59 +1,73 @@
 import streamlit as st
+import imaplib
+import email
+from email.header import decode_header
 import pandas as pd
-from datetime import date
 
-# Configuración con el color de tu app
-st.set_page_config(page_title="New App", layout="centered")
+# --- CONFIGURACIÓN DE SEGURIDAD ---
+# REEMPLAZA ESTO CON TUS DATOS REALES
+EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
+EMAIL_PASSWORD = "wkpn qayc mtqj ucut" # Pega aquí las 16 letras sin espacios
 
-# Estilo CSS para imitar a AppSheet (Botones naranjas y bordes redondeados)
-st.markdown("""
-    <style>
-    .stApp { background-color: #f8f9fa; }
-    .stButton>button { width: 100%; background-color: #f39c12; color: white; border-radius: 10px; border: none; height: 50px; }
-    .stHeader { background-color: #f39c12; padding: 10px; color: white; border-radius: 5px; }
-    [data-testid="stMetricValue"] { color: #f39c12; }
-    </style>
-    """, unsafe_allow_html=True)
+def leer_correos():
+    try:
+        imap = imaplib.IMAP4_SSL("imap.gmail.com")
+        imap.login(EMAIL_USUARIO, EMAIL_PASSWORD)
+        imap.select("INBOX")
 
-# Encabezado como en tu captura
-st.markdown("<div class='stHeader'><h2 style='text-align: center; margin:0;'>🚜 New App</h2></div>", unsafe_allow_html=True)
+        # Buscamos correos (puedes filtrar por remitente o palabra clave)
+        status, mensajes = imap.search(None, 'ALL')
+        ids = mensajes[0].split()
+        
+        lista_final = []
+        # Tomamos los últimos 10 correos para revisar
+        for i in reversed(ids[-10:]):
+            res, msg = imap.fetch(i, "(RFC822)")
+            for respuesta in msg:
+                if isinstance(respuesta, tuple):
+                    mensaje = email.message_from_bytes(respuesta[1])
+                    asunto, codificacion = decode_header(mensaje["Subject"])[0]
+                    if isinstance(asunto, bytes):
+                        asunto = asunto.decode(codificacion or "utf-8")
+                    
+                    remitente = mensaje.get("From")
+                    fecha = mensaje.get("Date")
+                    
+                    lista_final.append({
+                        "Fecha": fecha,
+                        "De": remitente,
+                        "Asunto": asunto
+                    })
+        imap.logout()
+        return lista_final
+    except Exception as e:
+        return f"Error: {e}"
 
-# Simulación de la barra de navegación de AppSheet (Eventos, Ingreso, Reporte)
-menu = st.columns(3)
-with menu[0]:
-    btn_eventos = st.button("📅 Eventos")
-with menu[1]:
-    btn_ingreso = st.button("📋 Ingreso")
-with menu[2]:
-    btn_reporte = st.button("📄 Reporte")
+# --- INTERFAZ TIPO APPSHEET ---
+st.set_page_config(page_title="Eventos de Servicio", layout="centered")
 
-st.divider()
+st.markdown("<h2 style='text-align: center; color: #f39c12;'>📅 Panel de Eventos</h2>", unsafe_allow_html=True)
 
-# Lógica de las pantallas
-if btn_ingreso:
-    st.subheader("Ingreso De Servicio")
-    with st.container():
-        usuario = st.text_input("USUARIO", value="kiritokayabaki@gmail.com")
-        fecha = st.date_input("FECHA", date.today())
-        estado = st.selectbox("ESTADO", ["Pendiente", "En Proceso", "Completado"])
-        st.button("GUARDAR REGISTRO")
-
-elif btn_reporte:
-    st.subheader("Reporte de servicios")
-    # Tarjeta visual estilo AppSheet
-    st.info(f"Fecha del reporte: {date.today()}")
-    st.write("**Detalle de Maquinaria:**")
-    col1, col2 = st.columns(2)
-    col1.write("🛠 **Equipo:** Montacargas")
-    col2.write("🔢 **Serie:** A234X0567")
-
-else:
-    # Pantalla por defecto (Eventos/Home)
-    st.subheader("Vista por FECHA")
-    st.write("2/23/2026")
-    st.markdown("""
-    <div style="background-color: white; padding: 15px; border-left: 5px solid #f39c12; border-radius: 5px; box-shadow: 2px 2px 5px rgba(0,0,0,0.1);">
-        <strong>Servicio Preventivo</strong><br>
-        <small>Estado: Pendiente | Horómetro: 1200 hrs</small>
-    </div>
-    """, unsafe_allow_html=True)
+if st.button("📥 Sincronizar con Gmail"):
+    with st.spinner("Buscando correos nuevos..."):
+        datos = leer_correos()
+        
+        if isinstance(datos, list):
+            for item in datos:
+                with st.container():
+                    st.markdown(f"""
+                    <div style="border: 1px solid #ddd; border-radius: 10px; padding: 15px; margin-bottom: 10px; background-color: white;">
+                        <h4 style="margin:0; color: #333;">{item['Asunto']}</h4>
+                        <p style="margin:0; font-size: 0.8em; color: #666;">{item['De']} | {item['Fecha']}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Botones de acción como en AppSheet
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("📝 Comentar", key=f"coment_{item['Asunto']}"):
+                            st.info("Función de guardado en preparación...")
+                    with col2:
+                        st.file_uploader("📷 Subir Foto", key=f"foto_{item['Asunto']}")
+        else:
+            st.error(datos)
