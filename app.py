@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
 
-# --- FUNCIONES DE DATOS (Sin cambios) ---
+# --- FUNCIONES DE DATOS ---
 def decodificar_texto(texto, encoding):
     try:
         if isinstance(texto, bytes): return texto.decode(encoding or "utf-8", errors="replace")
@@ -36,7 +36,7 @@ def buscar_ids_recientes():
         imap.select("INBOX", readonly=True)
         status, mensajes = imap.search(None, 'ALL')
         ids = mensajes[0].split()
-        return [i.decode() for i in ids[-20:]] # Revisamos los últimos 20 para pescar novedades
+        return [i.decode() for i in ids[-20:]]
     except: return []
 
 def leer_contenido_completo(ids_a_buscar):
@@ -65,7 +65,7 @@ def leer_contenido_completo(ids_a_buscar):
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Maquinaria Dash Pro", layout="wide")
 
-# --- CSS (Tus badges y botones intactos) ---
+# --- CSS ---
 st.markdown("""
     <style>
     .stButton > button { width: 100%; border-radius: 8px; height: 3.5em; background-color: #f0f2f6; color: #1f1f1f !important; font-weight: 600; }
@@ -76,25 +76,26 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- INICIALIZACIÓN DE MEMORIA (ACUMULATIVA) ---
+# --- INICIALIZACIÓN ---
 if "db_comentarios" not in st.session_state: st.session_state.db_comentarios = {}
 if "db_fotos" not in st.session_state: st.session_state.db_fotos = {}
 if "lista_correos" not in st.session_state: st.session_state.lista_correos = []
 if "ids_procesados" not in st.session_state: st.session_state.ids_procesados = set()
 if "seccion" not in st.session_state: st.session_state.seccion = "Inicio"
 
-# --- MOTOR DE ACTUALIZACIÓN (Solo agrega, nunca borra) ---
+# --- MOTOR DE ACTUALIZACIÓN ---
 @st.fragment(run_every="30s")
 def sincronizador_infinito():
     ids_recientes = buscar_ids_recientes()
-    # Buscamos cuáles no tenemos todavía
     ids_nuevos = [i for i in ids_recientes if i not in st.session_state.ids_procesados]
     
     if ids_nuevos:
         nuevos_correos = leer_contenido_completo(ids_nuevos)
-        # Los sumamos a los que ya existen (Nuevos arriba)
-        st.session_state.lista_correos = nuevos_correos + st.session_state.lista_correos
-        # Los marcamos como guardados
+        # Filtro de seguridad extra para evitar duplicados en la lista visual
+        ids_en_lista = [c['id'] for c in st.session_state.lista_correos]
+        correos_reales = [c for c in nuevos_correos if c['id'] not in ids_en_lista]
+        
+        st.session_state.lista_correos = correos_reales + st.session_state.lista_correos
         for i in ids_nuevos:
             st.session_state.ids_procesados.add(i)
         st.rerun()
@@ -108,11 +109,11 @@ atendidas = [c for c in st.session_state.lista_correos if st.session_state.db_co
 # --- BARRA LATERAL ---
 with st.sidebar:
     st.markdown("### 🚜 Menú")
-    if st.button("🏠 Inicio"): st.session_state.seccion = "Inicio"
+    if st.button("🏠 Inicio", key="btn_nav_inicio"): st.session_state.seccion = "Inicio"
     st.write("")
-    if st.button("🔴 Pendientes"): st.session_state.seccion = "Pendientes"
+    if st.button("🔴 Pendientes", key="btn_nav_pend"): st.session_state.seccion = "Pendientes"
     st.markdown(f'<div class="badge-container"><span></span><span class="badge-text bg-pendientes">{len(pendientes)}</span></div>', unsafe_allow_html=True)
-    if st.button("🟢 Atendidas"): st.session_state.seccion = "Atendidas"
+    if st.button("🟢 Atendidas", key="btn_nav_atend"): st.session_state.seccion = "Atendidas"
     st.markdown(f'<div class="badge-container"><span></span><span class="badge-text bg-atendidas">{len(atendidas)}</span></div>', unsafe_allow_html=True)
 
 # --- PANTALLAS ---
@@ -139,17 +140,18 @@ elif st.session_state.seccion == "Pendientes":
         with st.expander(f"⚠️ {item.get('Asunto')}"):
             st.write(f"**De:** {item.get('De')}")
             st.info(f"**Cuerpo:**\n\n{item.get('Cuerpo', 'Sin contenido')}")
-            coment = st.text_area("Nota:", key=f"in_{uid}")
+            # LLAVES ÚNICAS POR SECCIÓN
+            coment = st.text_area("Nota:", key=f"text_pend_{uid}")
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("**🖼️ Antes**")
-                f_ant = st.file_uploader("Subir", key=f"u_ant_{uid}", label_visibility="collapsed")
+                f_ant = st.file_uploader("Subir", key=f"up_ant_pend_{uid}", label_visibility="collapsed")
                 if f_ant: st.image(f_ant, width=250); st.session_state.db_fotos[f"ant_{uid}"] = f_ant
             with c2:
                 st.markdown("**📸 Actual**")
-                f_act = st.file_uploader("Subir", key=f"u_act_{uid}", label_visibility="collapsed")
+                f_act = st.file_uploader("Subir", key=f"up_act_pend_{uid}", label_visibility="collapsed")
                 if f_act: st.image(f_act, width=250); st.session_state.db_fotos[f"act_{uid}"] = f_act
-            if st.button("Confirmar ✅", key=f"sv_{uid}"):
+            if st.button("Confirmar ✅", key=f"btn_save_pend_{uid}"):
                 if coment.strip():
                     st.session_state.db_comentarios[uid] = coment
                     st.rerun()
@@ -167,6 +169,7 @@ elif st.session_state.seccion == "Atendidas":
                 with c1: st.image(st.session_state.db_fotos[f"ant_{uid}"], width=200)
             if f"act_{uid}" in st.session_state.db_fotos:
                 with c2: st.image(st.session_state.db_fotos[f"act_{uid}"], width=200)
-            if st.button("Reabrir 🔓", key=f"re_{uid}"):
+            # LLAVE ÚNICA PARA EL BOTÓN DE REABRIR
+            if st.button("Reabrir 🔓", key=f"btn_reopen_aten_{uid}"):
                 st.session_state.db_comentarios.pop(uid)
                 st.rerun()
