@@ -7,24 +7,24 @@ import plotly.graph_objects as go
 import pandas as pd
 
 # --- 1. CONEXIÓN SEGURA (USA LOS SECRETS CONFIGURADOS) ---
-# Esta conexión busca automáticamente el bloque [gcp_service_account] en Streamlit Cloud
+# Esta conexión busca el bloque [gcp_service_account] en tus Secrets de Streamlit
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def cargar_datos_nube():
     try:
-        # ttl=0 para que PC y Celular vean cambios instantáneos sin memoria caché
+        # ttl=0 asegura que PC y Celular lean siempre lo más nuevo sin "memoria vieja"
         return conn.read(worksheet="Sheet1", ttl=0)
     except Exception as e:
         return pd.DataFrame(columns=["id", "asunto", "de", "cuerpo", "comentario"])
 
 def guardar_datos_nube(df_nuevo):
     try:
-        # Usamos el permiso de Editor de la Service Account para actualizar la hoja
+        # Al no pasar spreadsheet=URL_HOJA, usamos el permiso oficial del JSON
         conn.update(worksheet="Sheet1", data=df_nuevo)
     except Exception as e:
-        st.error(f"Error al guardar en la nube: {e}")
+        st.error(f"Error crítico al guardar: {e}")
 
-# --- 2. CONFIGURACIÓN DE GMAIL Y NOTIFICACIONES ---
+# --- 2. CONFIGURACIÓN DE GMAIL Y ALERTAS ---
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
 
@@ -60,7 +60,7 @@ def buscar_ids_recientes():
         status, mensajes = imap.search(None, 'ALL')
         ids = [i.decode() for i in mensajes[0].split()]
         imap.logout()
-        return ids[-20:]
+        return ids[-20:] # Revisa los últimos 20 correos
     except: return []
 
 def leer_contenido_completo(ids_a_buscar):
@@ -86,7 +86,7 @@ def leer_contenido_completo(ids_a_buscar):
         return lista
     except: return []
 
-# --- 3. CONFIGURACIÓN DE PÁGINA Y ESTILOS CSS ---
+# --- 3. CONFIGURACIÓN VISUAL Y ESTILOS ---
 st.set_page_config(page_title="Maquinaria Dash Pro", layout="wide")
 
 st.markdown("""<style>
@@ -98,15 +98,14 @@ st.markdown("""<style>
 </style>""", unsafe_allow_html=True)
 
 if "seccion" not in st.session_state: st.session_state.seccion = "Inicio"
-if "db_fotos" not in st.session_state: st.session_state.db_fotos = {}
 
 # --- 4. MOTOR DE SINCRONIZACIÓN (FRAGMENTO AUTOMÁTICO) ---
 @st.fragment(run_every="10s")
-def motor_principal():
-    # Sincroniza datos con la nube
+def motor_sincronizacion():
+    # A. Leer lo que hay en Google Sheets
     df_actual = cargar_datos_nube()
     
-    # Busca correos nuevos en Gmail
+    # B. Buscar correos nuevos
     ids_recientes = buscar_ids_recientes()
     ids_en_nube = df_actual['id'].astype(str).tolist() if not df_actual.empty else []
     ids_nuevos = [i for i in ids_recientes if str(i) not in ids_en_nube]
@@ -114,28 +113,30 @@ def motor_principal():
     if ids_nuevos:
         nuevos_correos = leer_contenido_completo(ids_nuevos)
         df_nuevos = pd.DataFrame(nuevos_correos)
-        df_nuevos['comentario'] = ""
-        # Combina lo nuevo con lo viejo y guarda
+        df_nuevos['comentario'] = "" # Nuevos entran sin comentario
+        
+        # Combinar y actualizar la nube
         df_final = pd.concat([df_nuevos, df_actual], ignore_index=True)
         guardar_datos_nube(df_final)
+        
         play_notification_sound()
-        st.toast("🚜 Nuevo reporte detectado", icon="📥")
+        st.toast("🚜 Nuevo reporte registrado en la nube", icon="📥")
         st.rerun()
     
     st.session_state.datos_app = df_actual
 
-# Ejecuta el motor de sincronización
-motor_principal()
+# Lanzar el motor
+motor_sincronizacion()
 
-# --- 5. INTERFAZ VISUAL ---
+# --- 5. INTERFAZ DE USUARIO ---
 df = st.session_state.get('datos_app', pd.DataFrame(columns=["id", "asunto", "de", "cuerpo", "comentario"]))
 df['comentario'] = df['comentario'].fillna("")
 pendientes = df[df['comentario'] == ""]
 atendidas = df[df['comentario'] != ""]
 
-# BARRA LATERAL (SIDEBAR)
+# BARRA LATERAL
 with st.sidebar:
-    st.title("🚜 Control")
+    st.title("🚜 Panel Control")
     if st.button("🏠 Inicio", key="nav_i"): st.session_state.seccion = "Inicio"
     st.write("---")
     if st.button("🔴 Pendientes", key="nav_p"): st.session_state.seccion = "Pendientes"
@@ -143,9 +144,9 @@ with st.sidebar:
     if st.button("🟢 Atendidas", key="nav_a"): st.session_state.seccion = "Atendidas"
     st.markdown(f'<div class="badge-container"><span></span><span class="badge-text bg-atendidas">{len(atendidas)}</span></div>', unsafe_allow_html=True)
 
-# SECCIONES DE LA APP
+# CONTENIDO PRINCIPAL
 if st.session_state.seccion == "Inicio":
-    st.title("📊 Monitor de Maquinaria")
+    st.title("📊 Monitor en Tiempo Real")
     c1, c2, c3 = st.columns([1,1,2])
     c1.metric("Pendientes", len(pendientes))
     c2.metric("Atendidas", len(atendidas))
@@ -156,27 +157,27 @@ if st.session_state.seccion == "Inicio":
             st.plotly_chart(fig, use_container_width=True)
 
 elif st.session_state.seccion == "Pendientes":
-    st.header("Órdenes por Atender")
+    st.header("Reportes Pendientes")
     for index, row in pendientes.iterrows():
         uid = str(row['id'])
         with st.expander(f"⚠️ {row['asunto']}"):
-            st.write(f"**De:** {row['de']}")
+            st.write(f"**Remitente:** {row['de']}")
             st.info(row['cuerpo'])
-            nota = st.text_area("Registrar solución:", key=f"n_{uid}")
-            if st.button("Finalizar Reporte ✅", key=f"btn_{uid}"):
+            nota = st.text_area("Escribir solución:", key=f"n_{uid}")
+            if st.button("Confirmar Atención ✅", key=f"btn_{uid}"):
                 if nota.strip():
                     df.loc[df['id'].astype(str) == uid, 'comentario'] = nota
                     guardar_datos_nube(df)
                     st.rerun()
 
 elif st.session_state.seccion == "Atendidas":
-    st.header("Historial de Mantenimiento")
+    st.header("Historial de Soluciones")
     for index, row in atendidas.iterrows():
         uid = str(row['id'])
         with st.expander(f"✅ {row['asunto']}"):
             st.write(f"**De:** {row['de']}")
-            st.success(f"**Nota registrada:** {row['comentario']}")
-            if st.button("Reabrir Caso 🔓", key=f"re_{uid}"):
+            st.success(f"**Solución:** {row['comentario']}")
+            if st.button("Reabrir Reporte 🔓", key=f"re_{uid}"):
                 df.loc[df['id'].astype(str) == uid, 'comentario'] = ""
                 guardar_datos_nube(df)
                 st.rerun()
