@@ -7,33 +7,35 @@ import plotly.graph_objects as go
 import pandas as pd
 
 # =========================================================
-# 1. CONFIGURACIÓN DE CONEXIÓN FORZADA
+# 1. CONFIGURACIÓN DE CONEXIÓN
 # =========================================================
-# Tu ID de hoja extraído de la URL
 ID_HOJA_CALCULO = "1fdCf2HsS8KKkuqrJ8DwiDednW8lwnz7-WfvuVJwQnBo" 
 
-# Forzamos la conexión para que use los Secrets del bloque [connections.gsheets]
-conn = st.connection("gsheets", type=GSheetsConnection)
+# Conexión forzada a los Secrets bajo el bloque [connections.gsheets]
+try:
+    conn = st.connection("gsheets", type=GSheetsConnection)
+except Exception as e:
+    st.error(f"Error de configuración en Secrets: {e}")
 
 def cargar_datos_nube():
     try:
-        # Forzamos modo privado con el ID
+        # ttl=0 asegura que si el mecánico actualiza en el taller, tú lo veas al instante
         return conn.read(spreadsheet=ID_HOJA_CALCULO, worksheet="Sheet1", ttl=0)
-    except Exception:
+    except Exception as e:
+        st.warning(f"Aún no hay datos en la nube o error de lectura: {e}")
         return pd.DataFrame(columns=["id", "asunto", "de", "cuerpo", "comentario"])
 
 def guardar_datos_nube(df_nuevo):
     try:
-        # Esta es la función que daba el error "Public Spreadsheet". 
-        # Al usar el ID y la conexión mapeada, se activa el modo Editor.
+        # El ID fuerza el uso de la Service Account configurada como EDITOR
         conn.update(spreadsheet=ID_HOJA_CALCULO, worksheet="Sheet1", data=df_nuevo)
-        st.success("✅ ¡Base de datos actualizada!")
+        st.success("✅ ¡Base de datos sincronizada!")
     except Exception as e:
-        st.error(f"Error crítico de permisos: {e}")
-        st.info("Verifica: 1. Secrets bloque [connections.gsheets]. 2. Correo Service Account como EDITOR en el Excel.")
+        st.error(f"Error al guardar: {e}")
+        st.info("Revisa si el correo del Service Account es EDITOR en tu Google Sheet.")
 
 # =========================================================
-# 2. MOTOR DE GMAIL
+# 2. MOTOR DE GMAIL (RECEPCIÓN DE REPORTES)
 # =========================================================
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
@@ -97,12 +99,13 @@ def leer_contenido_completo(ids_a_buscar):
     except: return []
 
 # =========================================================
-# 3. INTERFAZ Y LÓGICA DE CONTROL
+# 3. INTERFAZ Y LÓGICA
 # =========================================================
-st.set_page_config(page_title="Maquinaria Dash Pro", layout="wide")
+st.set_page_config(page_title="Gestión Maquinaria Pro", layout="wide")
 
 if "seccion" not in st.session_state: st.session_state.seccion = "Inicio"
 
+# Motor de sincronización automática cada 10 segundos
 @st.fragment(run_every="10s")
 def motor_sincronizacion():
     df_actual = cargar_datos_nube()
@@ -124,47 +127,56 @@ def motor_sincronizacion():
 
 motor_sincronizacion()
 
-# --- VISTAS ---
+# --- PROCESAMIENTO DE DATOS ---
 df = st.session_state.get('datos_app', pd.DataFrame(columns=["id", "asunto", "de", "cuerpo", "comentario"]))
 df['comentario'] = df['comentario'].fillna("")
 pendientes = df[df['comentario'] == ""]
 atendidas = df[df['comentario'] != ""]
 
+# --- BARRA LATERAL ---
 with st.sidebar:
-    st.title("🚜 Panel")
+    st.title("🚜 Control")
     if st.button("🏠 Inicio"): st.session_state.seccion = "Inicio"
     if st.button(f"🔴 Pendientes ({len(pendientes)})"): st.session_state.seccion = "Pendientes"
     if st.button(f"🟢 Atendidas ({len(atendidas)})"): st.session_state.seccion = "Atendidas"
 
+# --- VISTA INICIO ---
 if st.session_state.seccion == "Inicio":
-    st.title("📊 Monitor de Maquinaria")
+    st.title("📊 Resumen de Mantenimiento")
     c1, c2 = st.columns(2)
-    c1.metric("Pendientes", len(pendientes))
-    c2.metric("Atendidas", len(atendidas))
+    c1.metric("Por atender", len(pendientes))
+    c2.metric("Solucionados", len(atendidas))
     if not df.empty:
-        fig = go.Figure(data=[go.Pie(labels=['Pendientes', 'Atendidas'], values=[len(pendientes), len(atendidas)], hole=.4)])
+        fig = go.Figure(data=[go.Pie(labels=['Pendientes', 'Atendidas'], 
+                                    values=[len(pendientes), len(atendidas)], 
+                                    hole=.4, marker_colors=['#FF4B4B', '#00CC96'])])
         st.plotly_chart(fig)
 
+# --- VISTA PENDIENTES ---
 elif st.session_state.seccion == "Pendientes":
+    st.header("⚠️ Reportes Críticos")
     for index, row in pendientes.iterrows():
         uid = str(row['id'])
-        with st.expander(f"⚠️ {row['asunto']}"):
-            st.write(f"**De:** {row['de']}")
-            st.info(row['cuerpo'])
-            nota = st.text_area("Nota técnica:", key=f"n_{uid}")
-            if st.button("Confirmar ✅", key=f"btn_{uid}"):
+        with st.expander(f"Reporte de: {row['de']} - {row['asunto']}"):
+            st.info(f"**Mensaje:** {row['cuerpo']}")
+            nota = st.text_area("Describa la solución técnica:", key=f"n_{uid}")
+            if st.button("Marcar como Reparado ✅", key=f"btn_{uid}"):
                 if nota.strip():
                     df.loc[df['id'].astype(str) == uid, 'comentario'] = nota
                     guardar_datos_nube(df)
                     st.rerun()
+                else:
+                    st.warning("Por favor, escribe un comentario antes de finalizar.")
 
+# --- VISTA ATENDIDAS ---
 elif st.session_state.seccion == "Atendidas":
+    st.header("✅ Historial de Reparaciones")
     for index, row in atendidas.iterrows():
         uid = str(row['id'])
-        with st.expander(f"✅ {row['asunto']}"):
-            st.write(f"**De:** {row['de']}")
-            st.success(f"**Solución:** {row['comentario']}")
-            if st.button("Reabrir 🔓", key=f"re_{uid}"):
+        with st.expander(f"Finalizado: {row['asunto']}"):
+            st.write(f"**Reportado por:** {row['de']}")
+            st.success(f"**Solución aplicada:** {row['comentario']}")
+            if st.button("Reabrir Caso 🔓", key=f"re_{uid}"):
                 df.loc[df['id'].astype(str) == uid, 'comentario'] = ""
                 guardar_datos_nube(df)
                 st.rerun()
