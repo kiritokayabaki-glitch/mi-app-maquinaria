@@ -3,16 +3,12 @@ import imaplib
 import email
 from email.header import decode_header
 import time
-from streamlit_autorefresh import st_autorefresh # <-- Nueva librería
 
 # --- CONFIGURACIÓN ---
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
 
-# 1. AUTO-REFRESCO AUTOMÁTICO (Cada 10 segundos)
-# Esto hará que la app se sincronice sola sin parpadear el texto
-st_autorefresh(interval=10000, key="datarefresh")
-
+# --- FUNCIONES DE GMAIL ---
 def decodificar_texto(texto, encoding):
     try:
         if isinstance(texto, bytes):
@@ -65,45 +61,50 @@ if "db_comentarios" not in st.session_state:
 if "lista_correos" not in st.session_state:
     st.session_state.lista_correos = leer_correos()
 
-# Actualizar lista de correos en cada refresco automático
-st.session_state.lista_correos = leer_correos()
+# --- ESTA ES LA FUNCIÓN "MÁGICA" ANTI-PARPADEO ---
+@st.fragment(run_every="15s")
+def mostrar_y_actualizar_correos():
+    # Esta parte se actualiza sola cada 15 seg SIN refrescar toda la pantalla
+    st.session_state.lista_correos = leer_correos()
+    
+    if st.session_state.lista_correos:
+        for item in st.session_state.lista_correos:
+            uid = item['id']
+            with st.expander(f"📋 ORDEN: {item['Asunto']}", expanded=True):
+                col_info, col_registro = st.columns([1, 1])
+                
+                with col_info:
+                    st.write(f"**De:** {item['De']}")
+                    st.info(f"**Mensaje:**\n{item['Cuerpo']}")
+                
+                with col_registro:
+                    # Recuperar comentario guardado
+                    valor_previo = st.session_state.db_comentarios.get(uid, "")
+                    
+                    nuevo_comentario = st.text_area(
+                        "Comentario del Técnico:", 
+                        value=valor_previo, 
+                        key=f"input_{uid}"
+                    )
+                    
+                    # Guardar al escribir
+                    if nuevo_comentario != valor_previo:
+                        st.session_state.db_comentarios[uid] = nuevo_comentario
+                    
+                    # Estado
+                    if st.session_state.db_comentarios.get(uid, "").strip():
+                        st.success("🟢 ESTADO: ATENDIDA")
+                    else:
+                        st.error("🔴 ESTADO: PENDIENTE")
+                    
+                    c1, c2 = st.columns(2)
+                    with c1: st.file_uploader("🖼️ Anteriormente", key=f"ant_{uid}")
+                    with c2: st.file_uploader("📸 Actual", key=f"act_{uid}")
+                st.divider()
 
-st.title("🚜 Panel de Control - Actualización en Tiempo Real")
-st.write(f"Refrescando automáticamente cada 10 segundos...")
+# --- CUERPO PRINCIPAL ---
+st.title("🚜 Panel de Control Inteligente")
+st.write("Actualización silenciosa activa. Puedes escribir sin interrupciones.")
 
-# --- MOSTRAR CORREOS ---
-if st.session_state.lista_correos:
-    for item in st.session_state.lista_correos:
-        uid = item['id']
-        
-        with st.expander(f"📋 ORDEN: {item['Asunto']}", expanded=True):
-            col_info, col_registro = st.columns([1, 1])
-            
-            with col_info:
-                st.write(f"**De:** {item['De']}")
-                st.info(f"**Mensaje:**\n{item['Cuerpo']}")
-            
-            with col_registro:
-                # Recuperar comentario guardado
-                valor_previo = st.session_state.db_comentarios.get(uid, "")
-                
-                nuevo_comentario = st.text_area(
-                    "Comentario del Técnico:", 
-                    value=valor_previo, 
-                    key=f"input_{uid}"
-                )
-                
-                # Guardar al escribir
-                if nuevo_comentario != valor_previo:
-                    st.session_state.db_comentarios[uid] = nuevo_comentario
-                
-                # Estado
-                if st.session_state.db_comentarios.get(uid, "").strip():
-                    st.success("🟢 ESTADO: ATENDIDA")
-                else:
-                    st.error("🔴 ESTADO: PENDIENTE")
-                
-                c1, c2 = st.columns(2)
-                with c1: st.file_uploader("🖼️ Anteriormente", key=f"ant_{uid}")
-                with c2: st.file_uploader("📸 Actual", key=f"act_{uid}")
-            st.divider()
+# Llamamos a la función fragmentada
+mostrar_y_actualizar_correos()
