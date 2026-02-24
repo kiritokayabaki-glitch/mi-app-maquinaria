@@ -12,18 +12,11 @@ EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
 
 st.set_page_config(page_title="Gestión Maquinaria", layout="wide")
 
-# CONEXIÓN CON LIMPIEZA AUTOMÁTICA
+# CONEXIÓN DIRECTA (SIN MODIFICAR SECRETS)
 try:
-    # Corregimos la llave en tiempo real si el sistema se confunde con las barras
-    if "connections" in st.secrets and "gsheets" in st.secrets.connections:
-        raw_key = st.secrets.connections.gsheets.private_key
-        # Forzamos a que las barras invertidas se procesen correctamente
-        if "\\n" in raw_key:
-            st.secrets.connections.gsheets.private_key = raw_key.replace("\\n", "\n")
-
     conn = st.connection("gsheets", type=GSheetsConnection)
     df = conn.read(spreadsheet=ID_HOJA, worksheet="Sheet1", ttl=0)
-    st.sidebar.success("✅ Conectado")
+    st.sidebar.success("✅ Conectado a la nube")
     error_bloqueo = False
 except Exception as e:
     st.error(f"❌ Error de Conexión: {e}")
@@ -63,9 +56,10 @@ if not error_bloqueo:
         if nuevos_datos:
             df_final = pd.concat([pd.DataFrame(nuevos_datos), df], ignore_index=True)
             conn.update(spreadsheet=ID_HOJA, worksheet="Sheet1", data=df_final)
+            st.success("Reportes actualizados.")
             st.rerun()
         else:
-            st.info("Todo al día.")
+            st.info("No hay correos nuevos.")
 
     if not df.empty:
         df['comentario'] = df['comentario'].fillna("")
@@ -78,3 +72,5 @@ if not error_bloqueo:
                     df.loc[df['id'] == row['id'], 'comentario'] = sol
                     conn.update(spreadsheet=ID_HOJA, worksheet="Sheet1", data=df)
                     st.rerun()
+    else:
+        st.write("Conectado, pero la hoja está vacía.")
