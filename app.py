@@ -2,13 +2,13 @@ import streamlit as st
 import imaplib
 import email
 from email.header import decode_header
-import plotly.graph_objects as go # <-- Nueva pieza del rompecabezas
+import plotly.graph_objects as go
 
 # --- CONFIGURACIÓN ---
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
 
-# --- FUNCIONES DE DATOS (Sin cambios) ---
+# --- FUNCIONES DE DATOS ---
 def decodificar_texto(texto, encoding):
     try:
         if isinstance(texto, bytes):
@@ -77,10 +77,26 @@ st.markdown("""
 # Inicializar memoria
 if "db_comentarios" not in st.session_state: st.session_state.db_comentarios = {}
 if "db_fotos" not in st.session_state: st.session_state.db_fotos = {}
-if "lista_correos" not in st.session_state: st.session_state.lista_correos = leer_contenido_completo(buscar_ids_recientes())
+if "ids_actuales" not in st.session_state: st.session_state.ids_actuales = []
+if "lista_correos" not in st.session_state:
+    st.session_state.ids_actuales = buscar_ids_recientes()
+    st.session_state.lista_correos = leer_contenido_completo(st.session_state.ids_actuales)
 if "seccion" not in st.session_state: st.session_state.seccion = "Inicio"
 
-# Filtros
+# --- MOTOR DE ACTUALIZACIÓN AUTOMÁTICA (FRAGMENTO) ---
+@st.fragment(run_every="30s")
+def sincronizador_automatico():
+    # Esta función corre cada 30 segundos "por debajo"
+    nuevos_ids = buscar_ids_recientes()
+    if nuevos_ids != st.session_state.ids_actuales:
+        st.session_state.ids_actuales = nuevos_ids
+        st.session_state.lista_correos = leer_contenido_completo(nuevos_ids)
+        st.rerun() # Solo refresca la pantalla si hay correos de verdad
+
+# Ejecutar el sincronizador
+sincronizador_automatico()
+
+# Filtros para las pantallas
 pendientes = [c for c in st.session_state.lista_correos if not st.session_state.db_comentarios.get(c['id'], "").strip()]
 atendidas = [c for c in st.session_state.lista_correos if st.session_state.db_comentarios.get(c['id'], "").strip()]
 
@@ -97,24 +113,16 @@ with st.sidebar:
 # --- PANTALLAS ---
 if st.session_state.seccion == "Inicio":
     st.title("📊 Resumen de Tareas")
-    
     col_met1, col_met2, col_graf = st.columns([1, 1, 2])
-    
-    with col_met1:
-        st.metric("🔴 Pendientes", len(pendientes))
-    with col_met2:
-        st.metric("🟢 Atendidas", len(atendidas))
-    
+    with col_met1: st.metric("🔴 Pendientes", len(pendientes))
+    with col_met2: st.metric("🟢 Atendidas", len(atendidas))
     with col_graf:
         if len(st.session_state.lista_correos) > 0:
-            # Gráfica con efecto de profundidad (Pull)
             fig = go.Figure(data=[go.Pie(
                 labels=['Pendientes', 'Atendidas'], 
                 values=[len(pendientes), len(atendidas)],
-                hole=.4,
-                marker_colors=['#ffc1c1', '#c1f2c1'],
-                textinfo='percent',
-                pull=[0.1, 0] # Este hace que la parte roja resalte hacia afuera
+                hole=.4, marker_colors=['#ffc1c1', '#c1f2c1'],
+                textinfo='percent', pull=[0.1, 0]
             )])
             fig.update_layout(showlegend=True, height=300, margin=dict(t=0, b=0, l=0, r=0))
             st.plotly_chart(fig, use_container_width=True)
@@ -125,19 +133,18 @@ elif st.session_state.seccion == "Pendientes":
         uid = item['id']
         with st.expander(f"⚠️ {item.get('Asunto')}"):
             st.write(f"**De:** {item.get('De')}")
-            st.info(f"**Cuerpo del Correo:**\n\n{item.get('Cuerpo', 'Sin contenido')}")
+            cuerpo_txt = item.get('Cuerpo', "Sin contenido")
+            st.info(f"**Cuerpo del Correo:**\n\n{cuerpo_txt}")
             coment = st.text_area("Registrar nota:", key=f"in_{uid}")
-            
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("**🖼️ Anteriormente**")
-                foto_ant = st.file_uploader("Subir", key=f"u_ant_{uid}", label_visibility="collapsed")
-                if foto_ant: st.image(foto_ant, width=250); st.session_state.db_fotos[f"ant_{uid}"] = foto_ant
+                f_ant = st.file_uploader("Subir", key=f"u_ant_{uid}", label_visibility="collapsed")
+                if f_ant: st.image(f_ant, width=250); st.session_state.db_fotos[f"ant_{uid}"] = f_ant
             with c2:
                 st.markdown("**📸 Actual**")
-                foto_act = st.file_uploader("Subir", key=f"u_act_{uid}", label_visibility="collapsed")
-                if foto_act: st.image(foto_act, width=250); st.session_state.db_fotos[f"act_{uid}"] = foto_act
-            
+                f_act = st.file_uploader("Subir", key=f"u_act_{uid}", label_visibility="collapsed")
+                if f_act: st.image(f_act, width=250); st.session_state.db_fotos[f"act_{uid}"] = f_act
             if st.button("Confirmar Atención ✅", key=f"sv_{uid}"):
                 if coment.strip():
                     st.session_state.db_comentarios[uid] = coment
@@ -151,15 +158,11 @@ elif st.session_state.seccion == "Atendidas":
             st.write(f"**De:** {item.get('De')}")
             st.info(f"**Cuerpo:**\n\n{item.get('Cuerpo', 'Sin contenido')}")
             st.success(f"**Nota:** {st.session_state.db_comentarios.get(uid)}")
-            
             c1, c2 = st.columns(2)
             with c1:
-                if f"ant_{uid}" in st.session_state.db_fotos:
-                    st.image(st.session_state.db_fotos[f"ant_{uid}"], width=200)
+                if f"ant_{uid}" in st.session_state.db_fotos: st.image(st.session_state.db_fotos[f"ant_{uid}"], width=200)
             with c2:
-                if f"act_{uid}" in st.session_state.db_fotos:
-                    st.image(st.session_state.db_fotos[f"act_{uid}"], width=200)
-            
+                if f"act_{uid}" in st.session_state.db_fotos: st.image(st.session_state.db_fotos[f"act_{uid}"], width=200)
             if st.button("Reabrir 🔓", key=f"re_{uid}"):
                 st.session_state.db_comentarios.pop(uid)
                 st.rerun()
