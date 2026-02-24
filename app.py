@@ -16,7 +16,6 @@ def decodificar_texto(texto, encoding):
     except: return "Texto no legible"
 
 def obtener_cuerpo(mensaje):
-    """Extrae el texto del cuerpo del correo"""
     cuerpo = ""
     if mensaje.is_multipart():
         for parte in mensaje.walk():
@@ -30,7 +29,7 @@ def obtener_cuerpo(mensaje):
         try:
             cuerpo = mensaje.get_payload(decode=True).decode("utf-8", errors="replace")
         except: pass
-    return cuerpo[:800] # Limitamos a 800 caracteres para no alargar mucho la tarjeta
+    return cuerpo[:800]
 
 def buscar_ids_recientes():
     try:
@@ -69,7 +68,7 @@ def leer_contenido_completo(ids_a_buscar):
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Maquinaria Dash Pro", layout="wide")
 
-# --- CSS PERSONALIZADO ---
+# --- CSS (Mantiene el estilo de tus botones y badges) ---
 st.markdown("""
     <style>
     .stButton > button { width: 100%; border-radius: 8px; height: 3.5em; background-color: #f0f2f6; color: #1f1f1f !important; font-weight: 600; }
@@ -113,7 +112,11 @@ elif st.session_state.seccion == "Pendientes":
         uid = item['id']
         with st.expander(f"⚠️ {item['Asunto']}"):
             st.write(f"**De:** {item['De']}")
-            st.info(f"**Cuerpo del Correo:**\n\n{item['Cuerpo']}") # AQUÍ APARECE EL CUERPO
+            
+            # PROTECCIÓN: Si no hay cuerpo, muestra aviso en lugar de error
+            cuerpo_txt = item.get('Cuerpo', "Contenido no disponible. Por favor, actualice la lista.")
+            st.info(f"**Cuerpo del Correo:**\n\n{cuerpo_txt}")
+            
             coment = st.text_area("Registrar nota:", key=f"in_{uid}")
             
             c1, c2 = st.columns(2)
@@ -141,16 +144,18 @@ elif st.session_state.seccion == "Atendidas":
         uid = item['id']
         with st.expander(f"✅ {item['Asunto']}"):
             st.write(f"**De:** {item['De']}")
-            st.info(f"**Cuerpo del Correo:**\n\n{item['Cuerpo']}") # TAMBIÉN EN ATENDIDAS
+            
+            # PROTECCIÓN: Si no hay cuerpo, muestra aviso en lugar de error
+            cuerpo_txt = item.get('Cuerpo', "Contenido no disponible.")
+            st.info(f"**Cuerpo del Correo:**\n\n{cuerpo_txt}")
+            
             st.success(f"**Nota de atención:** {st.session_state.db_comentarios.get(uid)}")
             
             c1, c2 = st.columns(2)
             with c1:
-                st.markdown("**🖼️ Vista Anterior**")
                 if f"ant_{uid}" in st.session_state.db_fotos:
                     st.image(st.session_state.db_fotos[f"ant_{uid}"], width=200)
             with c2:
-                st.markdown("**📸 Vista Actual**")
                 if f"act_{uid}" in st.session_state.db_fotos:
                     st.image(st.session_state.db_fotos[f"act_{uid}"], width=200)
             
