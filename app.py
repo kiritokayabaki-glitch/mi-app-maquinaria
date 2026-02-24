@@ -1,48 +1,28 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 import imaplib
 import email
 from email.header import decode_header
 import plotly.graph_objects as go
-import json
-import os
+import pandas as pd
 
-# --- 1. CONFIGURACIÓN DE MEMORIA PERMANENTE ---
-DB_FILE = "historial_maquinaria.json"
+# --- 1. CONEXIÓN A GOOGLE SHEETS ---
+# REEMPLAZA ESTO CON TU URL REAL
+URL_HOJA = "https://docs.google.com/spreadsheets/d/1fdCf2HsS8KKkuqrJ8DwiDednW8lwnz7-WfvuVJwQnBo/edit?gid=0#gid=0"
 
-def guardar_en_disco():
-    datos = {
-        "comentarios": st.session_state.db_comentarios,
-        "ids_procesados": list(st.session_state.ids_procesados),
-        "lista_correos": st.session_state.lista_correos
-    }
-    with open(DB_FILE, "w") as f:
-        json.dump(datos, f)
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-def cargar_de_disco():
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r") as f:
-                datos = json.load(f)
-                st.session_state.db_comentarios = datos.get("comentarios", {})
-                st.session_state.ids_procesados = set(datos.get("ids_procesados", []))
-                st.session_state.lista_correos = datos.get("lista_correos", [])
-        except: pass
+def cargar_datos_nube():
+    try:
+        # ttl="2s" fuerza a la app a ver cambios de otros dispositivos casi al instante
+        return conn.read(spreadsheet=URL_HOJA, ttl="2s")
+    except:
+        return pd.DataFrame(columns=["id", "asunto", "de", "cuerpo", "comentario"])
 
-# --- 2. CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Maquinaria Dash Pro", layout="wide")
+def guardar_datos_nube(df_nuevo):
+    conn.update(spreadsheet=URL_HOJA, data=df_nuevo)
 
-if "db_comentarios" not in st.session_state:
-    cargar_de_disco()
-    if "db_comentarios" not in st.session_state:
-        st.session_state.db_comentarios = {}
-        st.session_state.db_fotos = {}
-        st.session_state.lista_correos = []
-        st.session_state.ids_procesados = set()
-
-if "db_fotos" not in st.session_state: st.session_state.db_fotos = {}
-if "seccion" not in st.session_state: st.session_state.seccion = "Inicio"
-
-# --- 3. CONFIGURACIÓN DE CORREO Y SONIDO ---
+# --- 2. FUNCIONES DE GMAIL Y SONIDO (Tus originales) ---
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
 
@@ -50,7 +30,6 @@ def play_notification_sound():
     audio_html = """<audio autoplay><source src="https://raw.githubusercontent.com/fernandoalonso-ds/sounds/main/notification.mp3" type="audio/mp3"></audio>"""
     st.components.v1.html(audio_html, height=0)
 
-# (Funciones de Gmail idénticas a las anteriores)
 def decodificar_texto(texto, encoding):
     try:
         if isinstance(texto, bytes): return texto.decode(encoding or "utf-8", errors="replace")
@@ -77,8 +56,9 @@ def buscar_ids_recientes():
         imap.login(EMAIL_USUARIO, EMAIL_PASSWORD)
         imap.select("INBOX", readonly=True)
         status, mensajes = imap.search(None, 'ALL')
-        ids = mensajes[0].split()
-        return [i.decode() for i in ids[-20:]]
+        ids = [i.decode() for i in mensajes[0].split()]
+        imap.logout()
+        return ids[-20:]
     except: return []
 
 def leer_contenido_completo(ids_a_buscar):
@@ -94,45 +74,19 @@ def leer_contenido_completo(ids_a_buscar):
                     mensaje = email.message_from_bytes(respuesta[1])
                     asunto_raw = decode_header(mensaje.get("Subject", "Sin Asunto"))[0]
                     asunto = decodificar_texto(asunto_raw[0], asunto_raw[1])
-                    lista.append({"id": i, "Asunto": asunto, "De": mensaje.get("From"), "Cuerpo": obtener_cuerpo(mensaje)})
+                    lista.append({
+                        "id": i, 
+                        "asunto": asunto, 
+                        "de": mensaje.get("From"), 
+                        "cuerpo": obtener_cuerpo(mensaje)
+                    })
         imap.logout()
         return lista
     except: return []
 
-# --- 4. MOTOR DE SINCRONIZACIÓN TOTAL (PC + CELULAR + GMAIL) ---
-@st.fragment(run_every="30s")
-def motor_principal():
-    # A. Revisar cambios de otro dispositivo (PC <-> Celular)
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r") as f:
-                datos_disco = json.load(f)
-                # Si el archivo tiene info distinta a la memoria actual, sincronizar
-                if len(datos_disco.get("comentarios", {})) != len(st.session_state.db_comentarios) or \
-                   len(datos_disco.get("lista_correos", [])) != len(st.session_state.lista_correos):
-                    st.session_state.db_comentarios = datos_disco.get("comentarios", {})
-                    st.session_state.ids_procesados = set(datos_disco.get("ids_procesados", []))
-                    st.session_state.lista_correos = datos_disco.get("lista_correos", [])
-                    st.rerun()
-        except: pass
+# --- 3. CONFIGURACIÓN DE PÁGINA Y CSS ---
+st.set_page_config(page_title="Maquinaria Dash Pro", layout="wide")
 
-    # B. Revisar correos nuevos en Gmail
-    ids_recientes = buscar_ids_recientes()
-    ids_nuevos = [i for i in ids_recientes if i not in st.session_state.ids_procesados]
-    
-    if ids_nuevos:
-        nuevos_correos = leer_contenido_completo(ids_nuevos)
-        st.session_state.lista_correos = nuevos_correos + st.session_state.lista_correos
-        for i in ids_nuevos:
-            st.session_state.ids_procesados.add(i)
-        guardar_en_disco()
-        st.toast(f"Nuevo: {nuevos_correos[0]['Asunto']}", icon="🔔")
-        play_notification_sound()
-        st.rerun()
-
-motor_principal()
-
-# --- 5. INTERFAZ Y DISEÑO ---
 st.markdown("""<style>
     .stButton > button { width: 100%; border-radius: 8px; height: 3.5em; font-weight: 600; }
     .badge-container { display: flex; justify-content: space-between; margin-top: -48px; margin-bottom: 20px; padding: 0 15px; pointer-events: none; }
@@ -141,65 +95,100 @@ st.markdown("""<style>
     .bg-atendidas { background-color: #c1f2c1; }
 </style>""", unsafe_allow_html=True)
 
-pendientes = [c for c in st.session_state.lista_correos if not st.session_state.db_comentarios.get(c['id'], "").strip()]
-atendidas = [c for c in st.session_state.lista_correos if st.session_state.db_comentarios.get(c['id'], "").strip()]
+if "seccion" not in st.session_state: st.session_state.seccion = "Inicio"
+if "db_fotos" not in st.session_state: st.session_state.db_fotos = {}
+
+# --- 4. MOTOR DE SINCRONIZACIÓN NUBE (Cada 10 seg) ---
+@st.fragment(run_every="10s")
+def motor_nube():
+    df_actual = cargar_datos_nube()
+    ids_recientes = buscar_ids_recientes()
+    
+    # Aseguramos que los IDs sean tratados como texto para comparar
+    ids_en_nube = df_actual['id'].astype(str).tolist()
+    ids_nuevos = [i for i in ids_recientes if str(i) not in ids_en_nube]
+    
+    if ids_nuevos:
+        nuevos_datos = leer_contenido_completo(ids_nuevos)
+        df_nuevos = pd.DataFrame(nuevos_datos)
+        df_nuevos['comentario'] = ""
+        # Unir nuevos arriba, viejos abajo
+        df_final = pd.concat([df_nuevos, df_actual], ignore_index=True)
+        guardar_datos_nube(df_final)
+        play_notification_sound()
+        st.toast("¡Nuevo reporte recibido!", icon="🔔")
+        st.rerun()
+    
+    st.session_state.datos_app = df_actual
+
+motor_nube()
+
+# --- 5. LÓGICA DE INTERFAZ ---
+df = st.session_state.get('datos_app', pd.DataFrame(columns=["id", "asunto", "de", "cuerpo", "comentario"]))
+
+# Limpieza de datos vacíos para los filtros
+df['comentario'] = df['comentario'].fillna("")
+pendientes = df[df['comentario'] == ""]
+atendidas = df[df['comentario'] != ""]
 
 with st.sidebar:
-    st.markdown("### 🚜 Menú")
-    if st.button("🏠 Inicio", key="nav_home"): st.session_state.seccion = "Inicio"
-    if st.button("🔔 Habilitar Alertas"): st.success("Alerta sonora lista")
+    st.title("🚜 Menú")
+    if st.button("🏠 Inicio", key="nav_i"): st.session_state.seccion = "Inicio"
+    if st.button("🔔 Habilitar Alertas"): st.success("Sonido activo")
     st.write("---")
     if st.button("🔴 Pendientes", key="nav_p"): st.session_state.seccion = "Pendientes"
     st.markdown(f'<div class="badge-container"><span></span><span class="badge-text bg-pendientes">{len(pendientes)}</span></div>', unsafe_allow_html=True)
     if st.button("🟢 Atendidas", key="nav_a"): st.session_state.seccion = "Atendidas"
     st.markdown(f'<div class="badge-container"><span></span><span class="badge-text bg-atendidas">{len(atendidas)}</span></div>', unsafe_allow_html=True)
 
+# --- PANTALLAS ---
 if st.session_state.seccion == "Inicio":
-    st.title("📊 Resumen")
+    st.title("📊 Resumen en Tiempo Real")
     c1, c2, c3 = st.columns([1,1,2])
-    c1.metric("🔴 Pendientes", len(pendientes))
-    c2.metric("🟢 Atendidas", len(atendidas))
+    c1.metric("Pendientes", len(pendientes))
+    c2.metric("Atendidas", len(atendidas))
     with c3:
-        if st.session_state.lista_correos:
-            fig = go.Figure(data=[go.Pie(labels=['Pendientes', 'Atendidas'], values=[len(pendientes), len(atendidas)], hole=.4, marker_colors=['#ffc1c1', '#c1f2c1'], pull=[0.1, 0])])
+        if not df.empty:
+            fig = go.Figure(data=[go.Pie(labels=['Pendientes', 'Atendidas'], values=[len(pendientes), len(atendidas)], hole=.4, marker_colors=['#ffc1c1', '#c1f2c1'])])
             fig.update_layout(height=250, margin=dict(t=0,b=0,l=0,r=0))
             st.plotly_chart(fig, use_container_width=True)
 
 elif st.session_state.seccion == "Pendientes":
-    st.title("🔴 Por Atender")
-    for item in pendientes:
-        uid = item['id']
-        with st.expander(f"⚠️ {item['Asunto']}"):
-            st.write(f"**De:** {item['De']}")
-            st.info(item['Cuerpo'])
-            coment = st.text_area("Nota:", key=f"t_{uid}")
+    st.title("🔴 Órdenes Pendientes")
+    for _, row in pendientes.iterrows():
+        with st.expander(f"⚠️ {row['asunto']}"):
+            st.write(f"**De:** {row['de']}")
+            st.info(row['cuerpo'])
+            nota = st.text_area("Registrar nota:", key=f"n_{row['id']}")
+            
             col1, col2 = st.columns(2)
             with col1:
-                ant = st.file_uploader("Antes", key=f"a_{uid}", label_visibility="collapsed")
-                if ant: st.image(ant, width=250); st.session_state.db_fotos[f"ant_{uid}"] = ant
+                ant = st.file_uploader("Antes", key=f"ant_{row['id']}")
+                if ant: st.session_state.db_fotos[f"a_{row['id']}"] = ant
             with col2:
-                act = st.file_uploader("Actual", key=f"c_{uid}", label_visibility="collapsed")
-                if act: st.image(act, width=250); st.session_state.db_fotos[f"act_{uid}"] = act
-            if st.button("Confirmar ✅", key=f"b_{uid}"):
-                if coment.strip():
-                    st.session_state.db_comentarios[uid] = coment
-                    guardar_en_disco()
+                act = st.file_uploader("Después", key=f"des_{row['id']}")
+                if act: st.session_state.db_fotos[f"d_{row['id']}"] = act
+            
+            if st.button("Confirmar ✅", key=f"btn_{row['id']}"):
+                if nota.strip():
+                    df.loc[df['id'] == row['id'], 'comentario'] = nota
+                    guardar_datos_nube(df)
                     st.rerun()
 
 elif st.session_state.seccion == "Atendidas":
-    st.title("🟢 Historial")
-    for item in atendidas:
-        uid = item['id']
-        with st.expander(f"✅ {item['Asunto']}"):
-            st.write(f"**De:** {item['De']}")
-            st.info(item['Cuerpo'])
-            st.success(f"Nota: {st.session_state.db_comentarios.get(uid)}")
+    st.title("🟢 Historial en la Nube")
+    for _, row in atendidas.iterrows():
+        with st.expander(f"✅ {row['asunto']}"):
+            st.write(f"**De:** {row['de']}")
+            st.success(f"**Nota:** {row['comentario']}")
+            # Mostrar fotos si existen en la sesión actual
             c1, c2 = st.columns(2)
-            if f"ant_{uid}" in st.session_state.db_fotos:
-                with c1: st.image(st.session_state.db_fotos[f"ant_{uid}"], width=200)
-            if f"act_{uid}" in st.session_state.db_fotos:
-                with c2: st.image(st.session_state.db_fotos[f"act_{uid}"], width=200)
-            if st.button("Reabrir 🔓", key=f"r_{uid}"):
-                st.session_state.db_comentarios.pop(uid)
-                guardar_en_disco()
+            if f"a_{row['id']}" in st.session_state.db_fotos:
+                with c1: st.image(st.session_state.db_fotos[f"a_{row['id']}"], width=200)
+            if f"d_{row['id']}" in st.session_state.db_fotos:
+                with c2: st.image(st.session_state.db_fotos[f"d_{row['id']}"], width=200)
+            
+            if st.button("Reabrir 🔓", key=f"re_{row['id']}"):
+                df.loc[df['id'] == row['id'], 'comentario'] = ""
+                guardar_datos_nube(df)
                 st.rerun()
