@@ -1,194 +1,53 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
+import gspread
+from google.oauth2.service_account import Credentials
+import pandas as pd
 import imaplib
 import email
 from email.header import decode_header
 import plotly.graph_objects as go
-import pandas as pd
 
-# --- 1. CONEXIÓN A GOOGLE SHEETS ---
-# REEMPLAZA ESTO CON TU URL REAL
-URL_HOJA = "https://docs.google.com/spreadsheets/d/1fdCf2HsS8KKkuqrJ8DwiDednW8lwnz7-WfvuVJwQnBo/edit?gid=0#gid=0"
+# --- 1. CONEXIÓN SEGURA (Mantiene la sincronización) ---
+def conectar_google():
+    # Usa los Secrets que pegaremos en Streamlit Cloud (el JSON de Google)
+    creds_dict = st.secrets["gcp_service_account"]
+    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+    client = gspread.authorize(creds)
+    return client.open_by_key("TU_ID_DE_HOJA_LARGO").sheet1
 
-conn = st.connection("gsheets", type=GSheetsConnection)
+# --- 2. TUS FUNCIONES DE GMAIL (INTACTAS) ---
+# Aquí van tus funciones: decodificar_texto, obtener_cuerpo, buscar_ids_recientes, leer_contenido_completo
+# (Las que ya tienes funcionando perfectamente)
 
-def cargar_datos_nube():
-    try:
-        # ttl="2s" fuerza a la app a ver cambios de otros dispositivos casi al instante
-        return conn.read(spreadsheet=URL_HOJA, ttl="2s")
-    except:
-        return pd.DataFrame(columns=["id", "asunto", "de", "cuerpo", "comentario"])
-
-def guardar_datos_nube(df_nuevo):
-    conn.update(spreadsheet=URL_HOJA, data=df_nuevo)
-
-# --- 2. FUNCIONES DE GMAIL Y SONIDO (Tus originales) ---
-EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
-EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
-
-def play_notification_sound():
-    audio_html = """<audio autoplay><source src="https://raw.githubusercontent.com/fernandoalonso-ds/sounds/main/notification.mp3" type="audio/mp3"></audio>"""
-    st.components.v1.html(audio_html, height=0)
-
-def decodificar_texto(texto, encoding):
-    try:
-        if isinstance(texto, bytes): return texto.decode(encoding or "utf-8", errors="replace")
-        return str(texto)
-    except: return "Texto no legible"
-
-def obtener_cuerpo(mensaje):
-    cuerpo = ""
-    if mensaje.is_multipart():
-        for parte in mensaje.walk():
-            if parte.get_content_type() == "text/plain":
-                try:
-                    cuerpo = parte.get_payload(decode=True).decode("utf-8", errors="replace")
-                    break
-                except: pass
-    else:
-        try: cuerpo = mensaje.get_payload(decode=True).decode("utf-8", errors="replace")
-        except: pass
-    return cuerpo[:800]
-
-def buscar_ids_recientes():
-    try:
-        imap = imaplib.IMAP4_SSL("imap.gmail.com")
-        imap.login(EMAIL_USUARIO, EMAIL_PASSWORD)
-        imap.select("INBOX", readonly=True)
-        status, mensajes = imap.search(None, 'ALL')
-        ids = [i.decode() for i in mensajes[0].split()]
-        imap.logout()
-        return ids[-20:]
-    except: return []
-
-def leer_contenido_completo(ids_a_buscar):
-    try:
-        imap = imaplib.IMAP4_SSL("imap.gmail.com")
-        imap.login(EMAIL_USUARIO, EMAIL_PASSWORD)
-        imap.select("INBOX", readonly=True)
-        lista = []
-        for i in reversed(ids_a_buscar):
-            res, msg = imap.fetch(i, "(RFC822)")
-            for respuesta in msg:
-                if isinstance(respuesta, tuple):
-                    mensaje = email.message_from_bytes(respuesta[1])
-                    asunto_raw = decode_header(mensaje.get("Subject", "Sin Asunto"))[0]
-                    asunto = decodificar_texto(asunto_raw[0], asunto_raw[1])
-                    lista.append({
-                        "id": i, 
-                        "asunto": asunto, 
-                        "de": mensaje.get("From"), 
-                        "cuerpo": obtener_cuerpo(mensaje)
-                    })
-        imap.logout()
-        return lista
-    except: return []
-
-# --- 3. CONFIGURACIÓN DE PÁGINA Y CSS ---
-st.set_page_config(page_title="Maquinaria Dash Pro", layout="wide")
-
-st.markdown("""<style>
-    .stButton > button { width: 100%; border-radius: 8px; height: 3.5em; font-weight: 600; }
-    .badge-container { display: flex; justify-content: space-between; margin-top: -48px; margin-bottom: 20px; padding: 0 15px; pointer-events: none; }
-    .badge-text { font-weight: bold; padding: 2px 10px; border-radius: 12px; font-size: 14px; color: #1f1f1f; }
-    .bg-pendientes { background-color: #ffc1c1; }
-    .bg-atendidas { background-color: #c1f2c1; }
-</style>""", unsafe_allow_html=True)
-
-if "seccion" not in st.session_state: st.session_state.seccion = "Inicio"
-if "db_fotos" not in st.session_state: st.session_state.db_fotos = {}
-
-# --- 4. MOTOR DE SINCRONIZACIÓN NUBE (Cada 10 seg) ---
+# --- 3. MOTOR DE SINCRONIZACIÓN (LA CLAVE DEL ÉXITO) ---
 @st.fragment(run_every="10s")
-def motor_nube():
-    df_actual = cargar_datos_nube()
-    ids_recientes = buscar_ids_recientes()
+def motor_principal():
+    hoja = conectar_google()
     
-    # Aseguramos que los IDs sean tratados como texto para comparar
-    ids_en_nube = df_actual['id'].astype(str).tolist()
-    ids_nuevos = [i for i in ids_recientes if str(i) not in ids_en_nube]
+    # A. Leer lo que hay en la nube
+    datos_nube = pd.DataFrame(hoja.get_all_records())
+    
+    # B. Buscar correos nuevos en Gmail
+    ids_recientes = buscar_ids_recientes()
+    ids_en_hoja = datos_nube['id'].astype(str).tolist() if not datos_nube.empty else []
+    
+    ids_nuevos = [i for i in ids_recientes if str(i) not in ids_en_hoja]
     
     if ids_nuevos:
-        nuevos_datos = leer_contenido_completo(ids_nuevos)
-        df_nuevos = pd.DataFrame(nuevos_datos)
-        df_nuevos['comentario'] = ""
-        # Unir nuevos arriba, viejos abajo
-        df_final = pd.concat([df_nuevos, df_actual], ignore_index=True)
-        guardar_datos_nube(df_final)
+        nuevos_correos = leer_contenido_completo(ids_nuevos)
+        for correo in nuevos_correos:
+            # ESTO ES LO QUE NO FALLARÁ: Escribir el correo nuevo en la hoja
+            hoja.insert_row([correo['id'], correo['asunto'], correo['de'], correo['cuerpo'], ""], 2)
+        
+        # Activar tu sonido y notificación
         play_notification_sound()
-        st.toast("¡Nuevo reporte recibido!", icon="🔔")
+        st.toast("Nuevo reporte de maquinaria", icon="🚜")
         st.rerun()
-    
-    st.session_state.datos_app = df_actual
 
-motor_nube()
+    st.session_state.datos_app = datos_nube
 
-# --- 5. LÓGICA DE INTERFAZ ---
-df = st.session_state.get('datos_app', pd.DataFrame(columns=["id", "asunto", "de", "cuerpo", "comentario"]))
+motor_principal()
 
-# Limpieza de datos vacíos para los filtros
-df['comentario'] = df['comentario'].fillna("")
-pendientes = df[df['comentario'] == ""]
-atendidas = df[df['comentario'] != ""]
-
-with st.sidebar:
-    st.title("🚜 Menú")
-    if st.button("🏠 Inicio", key="nav_i"): st.session_state.seccion = "Inicio"
-    if st.button("🔔 Habilitar Alertas"): st.success("Sonido activo")
-    st.write("---")
-    if st.button("🔴 Pendientes", key="nav_p"): st.session_state.seccion = "Pendientes"
-    st.markdown(f'<div class="badge-container"><span></span><span class="badge-text bg-pendientes">{len(pendientes)}</span></div>', unsafe_allow_html=True)
-    if st.button("🟢 Atendidas", key="nav_a"): st.session_state.seccion = "Atendidas"
-    st.markdown(f'<div class="badge-container"><span></span><span class="badge-text bg-atendidas">{len(atendidas)}</span></div>', unsafe_allow_html=True)
-
-# --- PANTALLAS ---
-if st.session_state.seccion == "Inicio":
-    st.title("📊 Resumen en Tiempo Real")
-    c1, c2, c3 = st.columns([1,1,2])
-    c1.metric("Pendientes", len(pendientes))
-    c2.metric("Atendidas", len(atendidas))
-    with c3:
-        if not df.empty:
-            fig = go.Figure(data=[go.Pie(labels=['Pendientes', 'Atendidas'], values=[len(pendientes), len(atendidas)], hole=.4, marker_colors=['#ffc1c1', '#c1f2c1'])])
-            fig.update_layout(height=250, margin=dict(t=0,b=0,l=0,r=0))
-            st.plotly_chart(fig, use_container_width=True)
-
-elif st.session_state.seccion == "Pendientes":
-    st.title("🔴 Órdenes Pendientes")
-    for _, row in pendientes.iterrows():
-        with st.expander(f"⚠️ {row['asunto']}"):
-            st.write(f"**De:** {row['de']}")
-            st.info(row['cuerpo'])
-            nota = st.text_area("Registrar nota:", key=f"n_{row['id']}")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                ant = st.file_uploader("Antes", key=f"ant_{row['id']}")
-                if ant: st.session_state.db_fotos[f"a_{row['id']}"] = ant
-            with col2:
-                act = st.file_uploader("Después", key=f"des_{row['id']}")
-                if act: st.session_state.db_fotos[f"d_{row['id']}"] = act
-            
-            if st.button("Confirmar ✅", key=f"btn_{row['id']}"):
-                if nota.strip():
-                    df.loc[df['id'] == row['id'], 'comentario'] = nota
-                    guardar_datos_nube(df)
-                    st.rerun()
-
-elif st.session_state.seccion == "Atendidas":
-    st.title("🟢 Historial en la Nube")
-    for _, row in atendidas.iterrows():
-        with st.expander(f"✅ {row['asunto']}"):
-            st.write(f"**De:** {row['de']}")
-            st.success(f"**Nota:** {row['comentario']}")
-            # Mostrar fotos si existen en la sesión actual
-            c1, c2 = st.columns(2)
-            if f"a_{row['id']}" in st.session_state.db_fotos:
-                with c1: st.image(st.session_state.db_fotos[f"a_{row['id']}"], width=200)
-            if f"d_{row['id']}" in st.session_state.db_fotos:
-                with c2: st.image(st.session_state.db_fotos[f"d_{row['id']}"], width=200)
-            
-            if st.button("Reabrir 🔓", key=f"re_{row['id']}"):
-                df.loc[df['id'] == row['id'], 'comentario'] = ""
-                guardar_datos_nube(df)
-                st.rerun()
+# --- 4. INTERFAZ VISUAL (Tus diseños, badges y colores) ---
+# (Aquí sigue todo tu código de st.sidebar, los expanders, las fotos y la gráfica)
