@@ -7,27 +7,26 @@ import plotly.graph_objects as go
 import pandas as pd
 
 # --- 1. CONEXIÓN SEGURA (USA LOS SECRETS) ---
-# La conexión 'gsheets' leerá automáticamente tu bloque [gcp_service_account] de Secrets
+# La conexión 'gsheets' leerá automáticamente el bloque [gcp_service_account] de tus Secrets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def cargar_datos_nube():
     try:
-        # ttl=0 es CLAVE: obliga a la App a leer datos frescos de la nube cada vez
-        # Asegúrate de que tu pestaña en Excel se llame exactamente "Sheet1"
+        # ttl=0 asegura que PC y Celular lean siempre lo más nuevo
+        # IMPORTANTE: Revisa que tu pestaña abajo en el Excel se llame Sheet1
         return conn.read(worksheet="Sheet1", ttl=0)
     except Exception as e:
         return pd.DataFrame(columns=["id", "asunto", "de", "cuerpo", "comentario"])
 
 def guardar_datos_nube(df_nuevo):
     try:
-        # IMPORTANTE: Eliminamos 'spreadsheet=URL_HOJA'
-        # Al no poner la URL, la librería usa el permiso de Editor de tu JSON
-        # para escribir directamente en la hoja vinculada a esa cuenta de servicio.
+        # Aquí eliminamos la URL para usar el permiso de Editor de la cuenta de servicio
         conn.update(worksheet="Sheet1", data=df_nuevo)
     except Exception as e:
-        st.error(f"Error al guardar: {e}")
+        st.error(f"Error al guardar en la nube: {e}")
 
 # --- 2. CONFIGURACIÓN DE GMAIL Y ALERTAS ---
+# Reemplaza con tus datos reales si es necesario
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
 
@@ -89,7 +88,7 @@ def leer_contenido_completo(ids_a_buscar):
         return lista
     except: return []
 
-# --- 3. DISEÑO Y ESTILOS ---
+# --- 3. CONFIGURACIÓN DE PÁGINA Y DISEÑO ---
 st.set_page_config(page_title="Maquinaria Dash Pro", layout="wide")
 
 st.markdown("""<style>
@@ -102,12 +101,11 @@ st.markdown("""<style>
 
 if "seccion" not in st.session_state: st.session_state.seccion = "Inicio"
 
-# --- 4. MOTOR DE SINCRONIZACIÓN (FRAGMENTO) ---
+# --- 4. MOTOR DE SINCRONIZACIÓN ---
 @st.fragment(run_every="10s")
 def motor_sincronizacion():
     df_actual = cargar_datos_nube()
     
-    # Revisar Gmail
     ids_recientes = buscar_ids_recientes()
     ids_en_nube = df_actual['id'].astype(str).tolist() if not df_actual.empty else []
     ids_nuevos = [i for i in ids_recientes if str(i) not in ids_en_nube]
@@ -119,7 +117,7 @@ def motor_sincronizacion():
         df_final = pd.concat([df_nuevos, df_actual], ignore_index=True)
         guardar_datos_nube(df_final)
         play_notification_sound()
-        st.toast("🚜 Nuevo reporte en la nube", icon="📥")
+        st.toast("🚜 Nuevo reporte detectado", icon="📥")
         st.rerun()
     
     st.session_state.datos_app = df_actual
@@ -142,7 +140,7 @@ with st.sidebar:
     st.markdown(f'<div class="badge-container"><span></span><span class="badge-text bg-atendidas">{len(atendidas)}</span></div>', unsafe_allow_html=True)
 
 if st.session_state.seccion == "Inicio":
-    st.title("📊 Monitor de Maquinaria")
+    st.title("📊 Monitor en Tiempo Real")
     c1, c2, c3 = st.columns([1,1,2])
     c1.metric("Pendientes", len(pendientes))
     c2.metric("Atendidas", len(atendidas))
@@ -158,7 +156,7 @@ elif st.session_state.seccion == "Pendientes":
         with st.expander(f"⚠️ {row['asunto']}"):
             st.write(f"**De:** {row['de']}")
             st.info(row['cuerpo'])
-            nota = st.text_area("Solución:", key=f"n_{uid}")
+            nota = st.text_area("Registrar nota:", key=f"n_{uid}")
             if st.button("Confirmar ✅", key=f"btn_{uid}"):
                 if nota.strip():
                     df.loc[df['id'].astype(str) == uid, 'comentario'] = nota
