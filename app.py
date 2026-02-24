@@ -8,6 +8,30 @@ EMAIL_USUARIO = "kiritokayabaki@gmail.com"
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
 
 # --- FUNCIONES DE DATOS ---
+def decodificar_texto(texto, encoding):
+    try:
+        if isinstance(texto, bytes):
+            return texto.decode(encoding or "utf-8", errors="replace")
+        return str(texto)
+    except: return "Texto no legible"
+
+def obtener_cuerpo(mensaje):
+    """Extrae el texto del cuerpo del correo"""
+    cuerpo = ""
+    if mensaje.is_multipart():
+        for parte in mensaje.walk():
+            tipo = parte.get_content_type()
+            if tipo == "text/plain":
+                try:
+                    cuerpo = parte.get_payload(decode=True).decode("utf-8", errors="replace")
+                    break
+                except: pass
+    else:
+        try:
+            cuerpo = mensaje.get_payload(decode=True).decode("utf-8", errors="replace")
+        except: pass
+    return cuerpo[:800] # Limitamos a 800 caracteres para no alargar mucho la tarjeta
+
 def buscar_ids_recientes():
     try:
         imap = imaplib.IMAP4_SSL("imap.gmail.com")
@@ -30,8 +54,14 @@ def leer_contenido_completo(ids_a_buscar):
                 if isinstance(respuesta, tuple):
                     mensaje = email.message_from_bytes(respuesta[1])
                     asunto_raw = decode_header(mensaje.get("Subject", "Sin Asunto"))[0]
-                    asunto = str(asunto_raw[0])
-                    lista.append({"id": i, "Asunto": asunto, "De": mensaje.get("From")})
+                    asunto = decodificar_texto(asunto_raw[0], asunto_raw[1])
+                    cuerpo = obtener_cuerpo(mensaje)
+                    lista.append({
+                        "id": i, 
+                        "Asunto": asunto, 
+                        "De": mensaje.get("From"),
+                        "Cuerpo": cuerpo
+                    })
         imap.logout()
         return lista
     except: return []
@@ -83,6 +113,7 @@ elif st.session_state.seccion == "Pendientes":
         uid = item['id']
         with st.expander(f"⚠️ {item['Asunto']}"):
             st.write(f"**De:** {item['De']}")
+            st.info(f"**Cuerpo del Correo:**\n\n{item['Cuerpo']}") # AQUÍ APARECE EL CUERPO
             coment = st.text_area("Registrar nota:", key=f"in_{uid}")
             
             c1, c2 = st.columns(2)
@@ -90,14 +121,12 @@ elif st.session_state.seccion == "Pendientes":
                 st.markdown("**🖼️ Anteriormente-Imagen**")
                 foto_ant = st.file_uploader("Subir antes", key=f"u_ant_{uid}", label_visibility="collapsed")
                 if foto_ant:
-                    # TAMAÑO AJUSTADO AQUÍ
                     st.image(foto_ant, width=250) 
                     st.session_state.db_fotos[f"ant_{uid}"] = foto_ant
             with c2:
                 st.markdown("**📸 Actual-Imagen**")
                 foto_act = st.file_uploader("Subir actual", key=f"u_act_{uid}", label_visibility="collapsed")
                 if foto_act:
-                    # TAMAÑO AJUSTADO AQUÍ
                     st.image(foto_act, width=250)
                     st.session_state.db_fotos[f"act_{uid}"] = foto_act
             
@@ -111,21 +140,19 @@ elif st.session_state.seccion == "Atendidas":
     for item in atendidas:
         uid = item['id']
         with st.expander(f"✅ {item['Asunto']}"):
-            st.write(f"**Nota de atención:** {st.session_state.db_comentarios.get(uid)}")
+            st.write(f"**De:** {item['De']}")
+            st.info(f"**Cuerpo del Correo:**\n\n{item['Cuerpo']}") # TAMBIÉN EN ATENDIDAS
+            st.success(f"**Nota de atención:** {st.session_state.db_comentarios.get(uid)}")
             
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("**🖼️ Vista Anterior**")
                 if f"ant_{uid}" in st.session_state.db_fotos:
-                    # TAMAÑO AJUSTADO AQUÍ
                     st.image(st.session_state.db_fotos[f"ant_{uid}"], width=200)
-                else: st.warning("Sin foto")
             with c2:
                 st.markdown("**📸 Vista Actual**")
                 if f"act_{uid}" in st.session_state.db_fotos:
-                    # TAMAÑO AJUSTADO AQUÍ
                     st.image(st.session_state.db_fotos[f"act_{uid}"], width=200)
-                else: st.warning("Sin foto")
             
             if st.button("Reabrir Notificación 🔓", key=f"re_{uid}"):
                 st.session_state.db_comentarios.pop(uid)
