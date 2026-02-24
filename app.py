@@ -1,43 +1,67 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
+import pandas as pd
 import imaplib
 import email
 from email.header import decode_header
-import pandas as pd
+import gspread
+from google.oauth2.service_account import Credentials
 
 # =========================================================
-# 1. CONFIGURACIÓN
+# 1. CONFIGURACIÓN MANUAL (SIN SECRETS PARA LA LLAVE)
 # =========================================================
-ID_HOJA_CALCULO = "1fdCf2HsS8KKkuqrJ8DwiDednW8lwnz7-WfvuVJwQnBo" 
 
-st.set_page_config(page_title="Gestión Maquinaria Pro", layout="wide")
+# REEMPLAZA LOS DATOS DE ABAJO CON LOS DE TU ARCHIVO JSON
+GOOGLE_CREDENTIALS = {
+  "type": "service_account",
+  "project_id": "notificaciones-82eaf",
+  "private_key_id": "453af9d7c00be01c7650168a473a0e5181372646",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nTU_LLAVE_AQUI\n-----END PRIVATE KEY-----\n",
+  "client_email": "mi-app-maquinaria@notificaciones-82eaf.iam.gserviceaccount.com",
+  "client_id": "110397704418799334660",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/mi-app-maquinaria%40notificaciones-82eaf.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
 
-# Conexión directa
-try:
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    error_conexion = False
-except Exception as e:
-    st.error(f"❌ Error de conexión: {e}")
-    error_conexion = True
-
-def cargar_datos_nube():
-    try:
-        return conn.read(spreadsheet=ID_HOJA_CALCULO, worksheet="Sheet1", ttl=0)
-    except:
-        return pd.DataFrame()
-
-def guardar_datos_nube(df_nuevo):
-    try:
-        conn.update(spreadsheet=ID_HOJA_CALCULO, worksheet="Sheet1", data=df_nuevo)
-        st.success("✅ ¡Cambios guardados!")
-    except Exception as e:
-        st.error(f"Error al guardar: {e}")
-
-# =========================================================
-# 2. MOTOR DE GMAIL
-# =========================================================
+ID_HOJA = "1fdCf2HsS8KKkuqrJ8DwiDednW8lwnz7-WfvuVJwQnBo"
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
+
+# Conexión Robusta
+def conectar_google():
+    try:
+        scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        creds = Credentials.from_service_account_info(GOOGLE_CREDENTIALS, scopes=scope)
+        client = gspread.authorize(creds)
+        return client.open_by_key(ID_HOJA).sheet1
+    except Exception as e:
+        st.error(f"Error de conexión: {e}")
+        return None
+
+hoja = conectar_google()
+
+# =========================================================
+# 2. FUNCIONES DE DATOS
+# =========================================================
+
+def cargar_datos():
+    if hoja:
+        data = hoja.get_all_records()
+        return pd.DataFrame(data)
+    return pd.DataFrame()
+
+def guardar_datos(df):
+    if hoja:
+        hoja.clear()
+        # Actualizar con encabezados y datos
+        hoja.update([df.columns.values.tolist()] + df.values.tolist())
+        st.success("✅ ¡Base de datos actualizada!")
+
+# =========================================================
+# 3. MOTOR DE GMAIL
+# =========================================================
 
 def buscar_correos():
     try:
@@ -61,49 +85,44 @@ def buscar_correos():
     except: return []
 
 # =========================================================
-# 3. INTERFAZ
+# 4. INTERFAZ STREAMLIT
 # =========================================================
-if not error_conexion:
-    if "seccion" not in st.session_state: st.session_state.seccion = "Inicio"
+st.set_page_config(page_title="Maquinaria Dash", layout="wide")
+st.title("🚜 Gestión de Reportes")
 
-    @st.fragment(run_every="30s")
-    def sincronizar():
-        df_actual = cargar_datos_nube()
-        if not df_actual.empty:
-            ids_nube = df_actual['id'].astype(str).tolist()
-            nuevos = [c for c in buscar_correos() if str(c['id']) not in ids_nube]
-            if nuevos:
-                df_final = pd.concat([pd.DataFrame(nuevos), df_actual], ignore_index=True)
-                guardar_datos_nube(df_final)
-                st.rerun()
-        st.session_state.datos_app = df_actual
+if "seccion" not in st.session_state: st.session_state.seccion = "Inicio"
 
-    sincronizar()
-    df = st.session_state.get('datos_app', pd.DataFrame())
+if hoja:
+    df = cargar_datos()
+    
+    # Lógica de sincronización automática
+    ids_en_nube = df['id'].astype(str).tolist() if not df.empty else []
+    correos_nuevos = [c for c in buscar_correos() if str(c['id']) not in ids_en_nube]
+    
+    if correos_nuevos:
+        df_nuevos = pd.DataFrame(correos_nuevos)
+        df = pd.concat([df_nuevos, df], ignore_index=True)
+        guardar_datos(df)
+        st.rerun()
 
-    if not df.empty:
-        df['comentario'] = df['comentario'].fillna("")
-        pendientes = df[df['comentario'] == ""]
-        atendidas = df[df['comentario'] != ""]
+    # Interfaz de usuario
+    df['comentario'] = df['comentario'].fillna("")
+    pendientes = df[df['comentario'] == ""]
+    
+    st.sidebar.title("Menú")
+    if st.sidebar.button("🏠 Inicio"): st.session_state.seccion = "Inicio"
+    if st.sidebar.button(f"🔴 Pendientes ({len(pendientes)})"): st.session_state.seccion = "Pendientes"
 
-        with st.sidebar:
-            st.title("🚜 Control")
-            if st.button("🏠 Inicio"): st.session_state.seccion = "Inicio"
-            if st.button(f"🔴 Pendientes ({len(pendientes)})"): st.session_state.seccion = "Pendientes"
-            if st.button(f"🟢 Atendidas ({len(atendidas)})"): st.session_state.seccion = "Atendidas"
+    if st.session_state.seccion == "Inicio":
+        st.metric("Total Reportes", len(df))
+        st.metric("Pendientes", len(pendientes))
+        st.dataframe(df)
 
-        if st.session_state.seccion == "Inicio":
-            st.title("📊 Monitor")
-            st.metric("Pendientes", len(pendientes))
-            st.metric("Atendidas", len(atendidas))
-
-        elif st.session_state.seccion == "Pendientes":
-            for idx, row in pendientes.iterrows():
-                with st.expander(f"Reporte: {row['asunto']}"):
-                    nota = st.text_area("Solución:", key=f"n_{row['id']}")
-                    if st.button("Guardar ✅", key=f"b_{row['id']}"):
-                        df.loc[df['id'] == row['id'], 'comentario'] = nota
-                        guardar_datos_nube(df)
-                        st.rerun()
-else:
-    st.warning("⚠️ Error en la llave PEM. Por favor, revisa el formato en los Secretos.")
+    elif st.session_state.seccion == "Pendientes":
+        for idx, row in pendientes.iterrows():
+            with st.expander(f"Reporte: {row['asunto']}"):
+                comentario = st.text_area("Solución:", key=f"t_{row['id']}")
+                if st.button("Guardar ✅", key=f"b_{row['id']}"):
+                    df.loc[df['id'] == row['id'], 'comentario'] = comentario
+                    guardar_datos(df)
+                    st.rerun()
