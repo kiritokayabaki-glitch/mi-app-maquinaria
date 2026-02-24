@@ -5,16 +5,15 @@ from google.oauth2.service_account import Credentials
 import imaplib
 import email
 from email.header import decode_header
-import re
 
 # ==========================================
-# 1. CONFIGURACIÓN Y CREDENCIALES
+# 1. DATOS DE CONFIGURACIÓN
 # ==========================================
 ID_HOJA = "1fdCf2HsS8KKkuqrJ8DwiDednW8lwnz7-WfvuVJwQnBo"
 EMAIL_USUARIO = "kiritokayabaki@gmail.com" 
 EMAIL_PASSWORD = "wkpn qayc mtqj ucut"
 
-# PEGA AQUÍ TU LLAVE (Incluso si tiene \n o se ve rara)
+# PEGA AQUÍ TU LLAVE COMPLETA ENTRE LAS TRIPLES COMILLAS
 LLAVE_BRUTA = """-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCxmiHe70esGUZV
 vHiu5lfQfNWalqAMPb1IMU66QG9eRy/TnEbFn68bKX94HYSwG7Y2WRvZcmE/rVr6
@@ -58,26 +57,16 @@ CREDS_INFO = {
 }
 
 # ==========================================
-# 2. RECONSTRUCTOR DE LLAVE (BYPASS DE ERROR)
+# 2. PROCESADOR DE LLAVE
 # ==========================================
-def reconstruir_llave_limpia(raw):
-    # Eliminar cualquier rastro de encabezado viejo para evitar el error de posición 2
-    cuerpo = raw.replace("-----BEGIN PRIVATE KEY-----", "")
-    cuerpo = cuerpo.replace("-----END PRIVATE KEY-----", "")
-    # Quitar \n literales, saltos de línea y espacios
-    cuerpo = cuerpo.replace("\\n", "").replace("\n", "").replace(" ", "").strip()
-    
-    # Reconstruir con guiones estándar escritos directamente en el código
-    header = "-----BEGIN PRIVATE KEY-----"
-    footer = "-----END PRIVATE KEY-----"
-    
-    # Google espera bloques de 64 caracteres
-    lineas = [cuerpo[i:i+64] for i in range(0, len(cuerpo), 64)]
-    llave_final = header + "\n" + "\n".join(lineas) + "\n" + footer
-    return llave_final
+def preparar_llave(llave_recibida):
+    # Reemplazamos los \n literales por saltos de línea reales
+    llave = llave_recibida.replace("\\n", "\n")
+    # Limpiamos espacios accidentales
+    return llave.strip()
 
 # ==========================================
-# 3. LÓGICA DE CONEXIÓN Y APP
+# 3. CONEXIÓN Y APP
 # ==========================================
 st.set_page_config(page_title="Gestión Maquinaria", layout="wide")
 st.title("🚜 Sistema de Reportes")
@@ -87,11 +76,11 @@ def iniciar_conexion():
     try:
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         info = CREDS_INFO.copy()
-        # Aquí forzamos la reconstrucción limpia
-        info["private_key"] = reconstruir_llave_limpia(LLAVE_BRUTA)
+        info["private_key"] = preparar_llave(LLAVE_BRUTA)
         
         creds = Credentials.from_service_account_info(info, scopes=scope)
-        return gspread.authorize(creds).open_by_key(ID_HOJA).sheet1
+        client = gspread.authorize(creds)
+        return client.open_by_key(ID_HOJA).sheet1
     except Exception as e:
         st.error(f"❌ Error de Autenticación: {e}")
         return None
@@ -99,16 +88,17 @@ def iniciar_conexion():
 hoja = iniciar_conexion()
 
 if hoja:
-    st.sidebar.success("✅ Conectado")
+    st.sidebar.success("✅ Conectado con éxito")
     
-    # Leer datos actuales
+    # Intentar leer datos
     try:
-        df = pd.DataFrame(hoja.get_all_records())
+        records = hoja.get_all_records()
+        df = pd.DataFrame(records)
     except:
         df = pd.DataFrame(columns=["id", "asunto", "de", "comentario"])
 
     # Botón Gmail
-    if st.button("🔄 Sincronizar con Gmail"):
+    if st.button("🔄 Sincronizar"):
         try:
             imap = imaplib.IMAP4_SSL("imap.gmail.com")
             imap.login(EMAIL_USUARIO, EMAIL_PASSWORD)
@@ -141,5 +131,6 @@ if hoja:
             with st.expander(f"Reporte: {row['asunto']}"):
                 sol = st.text_area("Solución:", key=f"s_{row['id']}")
                 if st.button("Guardar ✅", key=f"b_{row['id']}"):
+                    # Fila: idx + 2 (1 por encabezado + 1 por base-1)
                     hoja.update_cell(idx + 2, 4, sol)
                     st.rerun()
