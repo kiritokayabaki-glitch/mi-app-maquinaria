@@ -47,14 +47,12 @@ st.markdown("""
     .badge-text { font-weight: bold; padding: 2px 10px; border-radius: 12px; font-size: 14px; color: #1f1f1f; }
     .bg-pendientes { background-color: #ffc1c1; }
     .bg-atendidas { background-color: #c1f2c1; }
-    /* Estilo para las tarjetas de imagen */
-    .img-box { border: 1px dashed #d1d5db; border-radius: 10px; padding: 10px; text-align: center; background: #fafafa; }
     </style>
     """, unsafe_allow_html=True)
 
 # Inicializar memoria
 if "db_comentarios" not in st.session_state: st.session_state.db_comentarios = {}
-if "db_fotos" not in st.session_state: st.session_state.db_fotos = {} # Nueva memoria para fotos
+if "db_fotos" not in st.session_state: st.session_state.db_fotos = {}
 if "lista_correos" not in st.session_state: st.session_state.lista_correos = leer_contenido_completo(buscar_ids_recientes())
 if "seccion" not in st.session_state: st.session_state.seccion = "Inicio"
 
@@ -87,19 +85,20 @@ elif st.session_state.seccion == "Pendientes":
             st.write(f"**De:** {item['De']}")
             coment = st.text_area("Registrar nota:", key=f"in_{uid}")
             
-            # SECCIÓN DE IMÁGENES
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("**🖼️ Anteriormente-Imagen**")
                 foto_ant = st.file_uploader("Subir antes", key=f"u_ant_{uid}", label_visibility="collapsed")
                 if foto_ant:
-                    st.image(foto_ant, use_container_width=True)
+                    # TAMAÑO AJUSTADO AQUÍ
+                    st.image(foto_ant, width=250) 
                     st.session_state.db_fotos[f"ant_{uid}"] = foto_ant
             with c2:
                 st.markdown("**📸 Actual-Imagen**")
                 foto_act = st.file_uploader("Subir actual", key=f"u_act_{uid}", label_visibility="collapsed")
                 if foto_act:
-                    st.image(foto_act, use_container_width=True)
+                    # TAMAÑO AJUSTADO AQUÍ
+                    st.image(foto_act, width=250)
                     st.session_state.db_fotos[f"act_{uid}"] = foto_act
             
             if st.button("Confirmar Atención ✅", key=f"sv_{uid}"):
@@ -114,18 +113,19 @@ elif st.session_state.seccion == "Atendidas":
         with st.expander(f"✅ {item['Asunto']}"):
             st.write(f"**Nota de atención:** {st.session_state.db_comentarios.get(uid)}")
             
-            # MOSTRAR IMÁGENES GUARDADAS
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("**🖼️ Vista Anterior**")
                 if f"ant_{uid}" in st.session_state.db_fotos:
-                    st.image(st.session_state.db_fotos[f"ant_{uid}"], use_container_width=True)
-                else: st.warning("Sin foto anterior")
+                    # TAMAÑO AJUSTADO AQUÍ
+                    st.image(st.session_state.db_fotos[f"ant_{uid}"], width=200)
+                else: st.warning("Sin foto")
             with c2:
                 st.markdown("**📸 Vista Actual**")
                 if f"act_{uid}" in st.session_state.db_fotos:
-                    st.image(st.session_state.db_fotos[f"act_{uid}"], use_container_width=True)
-                else: st.warning("Sin foto actual")
+                    # TAMAÑO AJUSTADO AQUÍ
+                    st.image(st.session_state.db_fotos[f"act_{uid}"], width=200)
+                else: st.warning("Sin foto")
             
             if st.button("Reabrir Notificación 🔓", key=f"re_{uid}"):
                 st.session_state.db_comentarios.pop(uid)
